@@ -432,7 +432,7 @@ client.on("messageCreate", async message => {
         await logToModlog(message.guild, new EmbedBuilder().setTitle("👢 Member Kicked").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
-      case "timeout": {
+      case "timeout": case "to": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         const mins = Number(args[1]);
         if (!targetMember || !mins) return void message.reply("Usage: `!timeout @user <minutes> [reason]`");
@@ -443,7 +443,7 @@ client.on("messageCreate", async message => {
         await logToModlog(message.guild, new EmbedBuilder().setTitle("⏱️ Member Timed Out").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Duration", value: `${mins} min`, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
-      case "untimeout": {
+      case "untimeout": case "rto": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!untimeout @user`");
         await targetMember.timeout(null);
