@@ -292,6 +292,20 @@ client.on("messageCreate", async message => {
         scheduleGiveaway(client, sent.id, ms);
         break;
       }
+      case "help": {
+        const embed = new EmbedBuilder()
+          .setTitle("📋 CRIMSON EM Bot Commands")
+          .setColor(0x5865f2)
+          .addFields(
+            { name: "🛡️ Moderation", value: "`!ban @user [reason]`\n`!unban <id>`\n`!kick @user [reason]`\n`!timeout @user <minutes>`\n`!untimeout @user`\n`!warn @user <reason>`\n`!warnings @user`\n`!clearwarnings @user`\n`!purge <1-100>`\n`!lock`\n`!unlock`" },
+            { name: "🎉 Fun", value: "`!coinflip`\n`!roll [sides] [count]`\n`!say <message>`\n`!poll Question? | Option1 | Option2`" },
+            { name: "🎁 Giveaway", value: "`!giveaway <duration> <winners> <prize>`\nExample: `!giveaway 10m 1 Nitro`" },
+            { name: "🎫 Tickets", value: "`!ticket-setup [title]`" },
+          )
+          .setFooter({ text: "All commands use the ! prefix" });
+        await message.reply({ embeds: [embed] });
+        break;
+      }
       case "ticket-setup": case "ticketsetup": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(TICKET_OPEN_BTN).setLabel("🎫 Open Ticket").setStyle(ButtonStyle.Primary));
