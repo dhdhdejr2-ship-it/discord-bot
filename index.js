@@ -538,11 +538,63 @@ client.on("messageCreate", async message => {
           .setTitle("📋 Bot Commands")
           .setColor(0x5865f2)
           .addFields(
-            { name: "ℹ️ Info", value: "`!ping` `!userinfo [@user]` `!serverinfo` `!avatar [@user]` `!membercount` `!uptime`" },
-            { name: "🎉 Fun", value: "`!8ball <question>` `!roll [sides] [count]` `!coinflip`" },
-            { name: "🔧 Utility", value: "`!poll Q | Opt1 | Opt2` `!remindme <min> <msg>` `!say [#ch] <msg>` `!announce #ch <title> | <msg>`\n`!role <add|remove> @user @role` `!setwelcome #ch <msg>` `!testwelcome`\n`!setleave #ch <msg>` `!testleave` `!setmodlog #ch`\n`!ticketsetup [cat-id] [@role]` `!ticketpanel [title]`" },
-            { name: "🛡️ Moderation", value: "`!ban @user [reason]` `!unban <id>` `!kick @user [reason]`\n`!timeout @user <min>` `!untimeout @user` `!warn @user <reason>`\n`!warnings @user` `!clearwarnings @user`\n`!slowmode <sec>` `!purge <1-100> [@user]` `!lock` `!unlock`" },
-            { name: "🎁 Giveaway", value: "`!giveaway <duration> <winners> <prize>`\nExample: `!giveaway 10m 1 Nitro`" },
+            {
+              name: "ℹ️ Info",
+              value: [
+                "`!ping` — Check bot latency",
+                "`!userinfo [@user]` — User information",
+                "`!serverinfo` — Server information",
+                "`!avatar [@user]` — Get a user's avatar",
+                "`!membercount` — Server member count",
+                "`!uptime` — How long the bot has been running",
+              ].join("\n"),
+            },
+            {
+              name: "🎉 Fun",
+              value: [
+                "`!8ball <question>` — Ask the magic 8-ball",
+                "`!roll [sides] [count]` — Roll dice",
+                "`!coinflip` — Flip a coin",
+              ].join("\n"),
+            },
+            {
+              name: "🔧 Utility",
+              value: [
+                "`!poll <question> | <opt1> | <opt2>` — Create a poll",
+                "`!remindme <minutes> <message>` — Set a DM reminder",
+                "`!say [#channel] <message>` — Make the bot say something",
+                "`!announce #channel <title> | <message>` — Post an announcement",
+                "`!role <add|remove> @user @role` — Add or remove a role",
+                "`!setwelcome #channel <message>` — Set welcome message",
+                "`!testwelcome` — Preview welcome message",
+                "`!setleave #channel <message>` — Set leave message",
+                "`!testleave` — Preview leave message",
+                "`!ticketsetup <category-id> [@role]` — Configure ticket system",
+                "`!ticketpanel [title]` — Post the ticket panel",
+                "`!setmodlog #channel` — Set the mod log channel",
+              ].join("\n"),
+            },
+            {
+              name: "🛡️ Moderation",
+              value: [
+                "`!kick @user [reason]` — Kick a member",
+                "`!ban @user [reason]` — Ban a member",
+                "`!unban <id>` — Unban a member",
+                "`!to @user <minutes> [reason]` — Timeout a member",
+                "`!rto @user` — Remove a timeout",
+                "`!warn @user <reason>` — Warn a member",
+                "`!warnings @user` — View a member's warnings",
+                "`!clearwarnings @user` — Clear all warnings",
+                "`!lock` — Lock the current channel",
+                "`!unlock` — Unlock the current channel",
+                "`!slowmode <seconds>` — Set slowmode",
+                "`!purge <1-100> [@user]` — Delete messages",
+              ].join("\n"),
+            },
+            {
+              name: "🎁 Giveaway",
+              value: "`!giveaway <duration> <winners> <prize>` — Start a giveaway\nExample: `!giveaway 10m 1 Nitro`",
+            },
           )
           .setFooter({ text: `Prefix: ! • CRIMSON EM#9236` });
         await message.reply({ embeds: [embed] });
