@@ -129,7 +129,14 @@ client.on("guildMemberAdd", async member => {
   const msg = cfg.welcomeMsg || `Welcome to **${member.guild.name}**, ${member}! You are member #${member.guild.memberCount}.`;
   try {
     const ch = await client.channels.fetch(chId);
-    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${member}`).replace("{server}", member.guild.name).replace("{count}", member.guild.memberCount)).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL())] });
+    const formatted = msg
+      .replace(/{user}/g, `${member}`)
+      .replace(/{username}/g, member.user.username)
+      .replace(/{tag}/g, member.user.tag)
+      .replace(/{server}/g, member.guild.name)
+      .replace(/{count}/g, member.guild.memberCount)
+      .replace(/{membercount}/g, member.guild.memberCount);
+    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL())] });
   } catch(e) { console.error("Welcome error:", e); }
 });
 
@@ -140,7 +147,8 @@ client.on("guildMemberRemove", async member => {
   const msg = cfg.leaveMsg || `**${member.user.tag}** has left the server.`;
   try {
     const ch = await client.channels.fetch(chId);
-    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Goodbye!").setDescription(msg.replace("{user}", member.user.tag).replace("{server}", member.guild.name)).setColor(0xed4245)] });
+    const formatted = msg.replace(/{user}/g, member.user.tag).replace(/{username}/g, member.user.username).replace(/{tag}/g, member.user.tag).replace(/{server}/g, member.guild.name);
+    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Goodbye!").setDescription(formatted).setColor(0xed4245)] });
   } catch(e) { console.error("Leave error:", e); }
 });
 
