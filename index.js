@@ -1,8 +1,7 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, TextChannel } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
-// ─── Storage ───────────────────────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -46,8 +45,7 @@ const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 function parseDuration(s) {
   const m = s.trim().match(/^(\d+)\s*(s|m|h|d)/i);
   if (!m) return null;
-  const n = Number(m[1]);
-  const u = m[2].toLowerCase();
+  const n = Number(m[1]), u = m[2].toLowerCase();
   return u === "s" ? n*1000 : u === "m" ? n*60000 : u === "h" ? n*3600000 : n*86400000;
 }
 
@@ -88,18 +86,26 @@ function resumeGiveaways(client) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
   partials: [Partials.Channel],
 });
 
-client.once("ready", () => { console.log(`Logged in as ${client.user.tag}`); resumeGiveaways(client); });
+client.once("clientReady", c => {
+  console.log(`✅ Logged in as ${c.user.tag}`);
+  resumeGiveaways(client);
+});
 
 client.on("guildMemberAdd", async member => {
   const chId = process.env.WELCOME_CHANNEL_ID; if (!chId) return;
   try {
     const ch = await client.channels.fetch(chId);
     await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(`Welcome to **${member.guild.name}**, ${member}! You are member #${member.guild.memberCount}.`).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL())] });
-  } catch {}
+  } catch(e) { console.error("Welcome error:", e); }
 });
 
 client.on("guildMemberRemove", async member => {
@@ -107,7 +113,7 @@ client.on("guildMemberRemove", async member => {
   try {
     const ch = await client.channels.fetch(chId);
     await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Goodbye!").setDescription(`**${member.user.tag}** has left the server.`).setColor(0xed4245)] });
-  } catch {}
+  } catch(e) { console.error("Leave error:", e); }
 });
 
 client.on("interactionCreate", async interaction => {
@@ -148,10 +154,13 @@ client.on("interactionCreate", async interaction => {
 });
 
 client.on("messageCreate", async message => {
+  console.log(`[MSG] ${message.author.tag} | bot=${message.author.bot} | guild=${!!message.guild} | "${message.content.slice(0,60)}"`);
   if (message.author.bot || !message.guild || !message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const cmd = args.shift()?.toLowerCase();
+  console.log(`[CMD] >${cmd}< args=${JSON.stringify(args)}`);
   if (!cmd) return;
+
   const targetUser = message.mentions.users.first();
   const targetMember = message.mentions.members?.first();
 
