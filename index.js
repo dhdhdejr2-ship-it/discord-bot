@@ -48,6 +48,15 @@ const giveaways = {
   all() { return loadJSON("giveaways.json"); },
 };
 
+// Reminders are persisted (like giveaways) so they survive a bot restart —
+// previously they only lived in an in-memory setTimeout and were silently
+// lost whenever the process restarted (e.g. on every redeploy).
+const reminders = {
+  add(r) { const d = loadJSON("reminders.json"); d.push(r); saveJSON("reminders.json", d); },
+  remove(id) { const d = loadJSON("reminders.json"); saveJSON("reminders.json", d.filter(r => r.id !== id)); },
+  all() { return loadJSON("reminders.json"); },
+};
+
 const PREFIX = "!";
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
@@ -232,6 +241,31 @@ async function endGiveaway(client, messageId) {
 }
 function scheduleGiveaway(client, messageId, ms) { setTimeout(() => endGiveaway(client, messageId), ms); }
 
+// ─── Reminders ─────────────────────────────────────────────────────────────
+async function fireReminder(client, r) {
+  reminders.remove(r.id);
+  try {
+    const user = await client.users.fetch(r.userId);
+    await user.send({ embeds: [new EmbedBuilder().setTitle("⏰ Reminder!").setDescription(r.reminder).setColor(0xffd700).setFooter({ text: `Set in ${r.guildName}` }).setTimestamp()] });
+  } catch {
+    try {
+      const ch = await client.channels.fetch(r.channelId);
+      await ch.send(`⏰ <@${r.userId}>, reminder: **${r.reminder}**`);
+    } catch {}
+  }
+}
+function scheduleReminder(client, r) {
+  const delay = new Date(r.dueAt).getTime() - Date.now();
+  setTimeout(() => fireReminder(client, r), Math.max(0, delay));
+}
+function resumeReminders(client) {
+  for (const r of reminders.all()) {
+    const delay = new Date(r.dueAt).getTime() - Date.now();
+    if (delay <= 0) fireReminder(client, r);
+    else scheduleReminder(client, r);
+  }
+}
+
 // ─── Welcome banner image ──────────────────────────────────────────────────
 const WELCOME_IMAGE_PATH = path.join(__dirname, "assets", "welcome.png");
 function welcomeImageAttachment() {
@@ -253,7 +287,7 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once("clientReady", c => { console.log(`✅ Logged in as ${c.user.tag}`); resumeGiveaways(client); });
+client.once("clientReady", c => { console.log(`✅ Logged in as ${c.user.tag}`); resumeGiveaways(client); resumeReminders(client); });
 
 // ─── Welcome ───────────────────────────────────────────────────────────────
 client.on("guildMemberAdd", async member => {
@@ -384,8 +418,14 @@ client.on("messageCreate", async message => {
   const cmd = args.shift()?.toLowerCase();
   if (!cmd) return;
 
-  const targetUser = message.mentions.users.first() || null;
-  const targetMember = targetUser ? await message.guild.members.fetch(targetUser.id).catch(()=>null) : null;
+  let targetUser = message.mentions.users.first() || null;
+  let targetMember = targetUser ? await message.guild.members.fetch(targetUser.id).catch(()=>null) : null;
+  // Fall back to a raw user ID (e.g. `!ban 123456789012345678 spam`) — needed
+  // because you can't @mention someone who already left the server.
+  if (!targetUser && /^\d{17,19}$/.test(args[0] || "")) {
+    targetMember = await message.guild.members.fetch(args[0]).catch(() => null);
+    targetUser = targetMember ? targetMember.user : await client.users.fetch(args[0]).catch(() => null);
+  }
 
   try {
     switch (cmd) {
@@ -487,19 +527,15 @@ client.on("messageCreate", async message => {
       }
       case "remind": {
         const timeStr = args[0];
-        const reminder = args.slice(1).join(" ");
-        if (!timeStr || !reminder) return void message.reply("Usage: `!remind <time> <message>` — e.g. `!remind 10m Take a break`");
+        const reminderText = args.slice(1).join(" ");
+        if (!timeStr || !reminderText) return void message.reply("Usage: `!remind <time> <message>` — e.g. `!remind 10m Take a break`");
         const ms = parseDuration(timeStr);
         if (!ms) return void message.reply("Invalid time. Use: `10s`, `5m`, `2h`, `1d`");
         if (ms > 86400000 * 7) return void message.reply("Max reminder time is 7 days.");
-        await message.reply(`✅ Got it! I'll remind you about **${reminder}** in **${timeStr}**.`);
-        setTimeout(async () => {
-          try {
-            await message.author.send({ embeds: [new EmbedBuilder().setTitle("⏰ Reminder!").setDescription(reminder).setColor(0xffd700).setFooter({ text: `Set in ${message.guild.name}` }).setTimestamp()] });
-          } catch {
-            await message.channel.send(`⏰ ${message.author}, reminder: **${reminder}**`).catch(()=>{});
-          }
-        }, ms);
+        const r = { id: `${Date.now()}-${message.author.id}`, userId: message.author.id, channelId: message.channel.id, guildName: message.guild.name, reminder: reminderText, dueAt: new Date(Date.now() + ms).toISOString() };
+        reminders.add(r);
+        scheduleReminder(client, r);
+        await message.reply(`✅ Got it! I'll remind you about **${reminderText}** in **${timeStr}**.`);
         break;
       }
       case "snipe": {
@@ -530,8 +566,8 @@ client.on("messageCreate", async message => {
         break;
       }
       case "roll": {
-        const sides = Number(args[0]) || 6;
-        const count = Math.min(Number(args[1]) || 1, 10);
+        const sides = Math.max(2, Number(args[0]) || 6);
+        const count = Math.min(Math.max(1, Number(args[1]) || 1), 10);
         const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
         await message.reply(count === 1 ? `🎲 Rolled a **${rolls[0]}** (d${sides})` : `🎲 Rolled: ${rolls.join(", ")} (d${sides})`);
         break;
@@ -928,7 +964,7 @@ client.on("messageCreate", async message => {
         const prize = prizeArr.join(" ");
         const ms = parseDuration(durStr || "");
         const winCount = Number(winStr);
-        if (!ms || !winCount || !prize) return void message.reply("Usage: `!giveaway <duration> <winners> <prize>` — e.g. `!giveaway 10m 1 Nitro`");
+        if (!ms || !Number.isInteger(winCount) || winCount < 1 || !prize) return void message.reply("Usage: `!giveaway <duration> <winners> <prize>` — e.g. `!giveaway 10m 1 Nitro`");
         const endsAt = new Date(Date.now() + ms).toISOString();
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("🎉 Enter Giveaway").setStyle(ButtonStyle.Primary));
         const embed = new EmbedBuilder()
