@@ -735,17 +735,23 @@ client.on("messageCreate", async message => {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
 
         const rest = message.content.slice(PREFIX.length + "role".length).trim();
-        const usage = "Usage: `!role <user> | <role>`\nExample: `!role Sam | Moderator` — adds it if Sam doesn't have it, removes it if he does. No ping needed — you can use a name instead of @mentioning.";
+        const usage = "Usage: `!role <@user> <role>` or `!role <user> | <role>`\nExample: `!role @Sam Moderator` or `!role Sam | Moderator` — adds it if Sam doesn't have it, removes it if he does. No ping needed for the user — a name or ID works too.";
         if (!rest) return void message.reply(usage);
 
         let userPart, rolePart;
-        if (rest.includes("|")) {
+        // If the user is @mentioned, cut that out first and treat literally everything
+        // else as the role name — this way a role name containing "|" (or anything
+        // else) still works, instead of breaking on the "|" separator.
+        const userMentionMatch = rest.match(/<@!?(\d+)>/);
+        if (userMentionMatch) {
+          userPart = userMentionMatch[0];
+          rolePart = (rest.slice(0, userMentionMatch.index) + rest.slice(userMentionMatch.index + userMentionMatch[0].length)).trim();
+        } else if (rest.includes("|")) {
           [userPart, rolePart] = rest.split("|").map(s => s.trim());
         } else {
-          // No "|" given — mark the split point with a role mention or a bare role ID
-          // (either way, no pinging is required for the user side).
-          const roleAnchorMatch = rest.match(/<@&\d+>/) || rest.match(/\b\d{17,19}\b/);
-          if (!roleAnchorMatch) return void message.reply(`Please separate the user and role with \`|\`.\n\n${usage}`);
+          // No mention and no "|" — mark the split point with a bare role ID instead.
+          const roleAnchorMatch = rest.match(/\b\d{17,19}\b/);
+          if (!roleAnchorMatch) return void message.reply(`Please mention the user, or separate the user and role with \`|\`.\n\n${usage}`);
           rolePart = roleAnchorMatch[0];
           userPart = rest.slice(0, roleAnchorMatch.index).trim();
         }
