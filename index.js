@@ -131,6 +131,16 @@ function parseDuration(s) {
   return u === "s" ? n*1000 : u === "m" ? n*60000 : u === "h" ? n*3600000 : n*86400000;
 }
 
+// Like parseDuration, but also accepts a bare number (treated as minutes) —
+// used by !to/!timeout so "10", "10m", "10min", and "10minutes" all work.
+function parseTimeoutDuration(s) {
+  if (!s) return null;
+  const viaUnit = parseDuration(s);
+  if (viaUnit) return viaUnit;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n * 60000 : null;
+}
+
 function requirePerm(msg, perm) {
   if (!msg.member?.permissions.has(perm)) {
     msg.reply("You don't have permission to use that command.").catch(()=>{});
@@ -833,12 +843,14 @@ client.on("messageCreate", async message => {
       }
       case "timeout": case "to": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
-        const mins = Number(args[1]);
-        if (!targetMember || isNaN(mins) || mins < 1) return void message.reply("Usage: `!to @user <minutes> [reason]`");
-        if (mins > 40320) return void message.reply("Timeout duration can't exceed 28 days (40320 minutes).");
+        const ms = parseTimeoutDuration(args[1]);
+        if (!targetMember || !ms) return void message.reply("Usage: `!to @user <duration> [reason]` — e.g. `!to @user 10`, `10m`, `10min`, `1h`, `1d` (a bare number means minutes)");
+        const maxMs = 28 * 24 * 60 * 60 * 1000; // Discord's timeout cap
+        if (ms > maxMs) return void message.reply("Timeout duration can't exceed 28 days.");
         if (!targetMember.moderatable) return void message.reply("I can't timeout that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
+        const mins = Math.round(ms / 60000);
         const reason = args.slice(2).join(" ") || "No reason provided";
-        await targetMember.timeout(mins * 60000, reason);
+        await targetMember.timeout(ms, reason);
         await message.reply(`⏱️ Timed out **${targetUser.tag}** for **${mins}m** — ${reason}`);
         await logToModlog(message.guild, new EmbedBuilder().setTitle("⏱️ Member Timed Out").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Duration", value: `${mins} min`, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
@@ -993,7 +1005,7 @@ client.on("messageCreate", async message => {
                 "`!kick @user [reason]` — Kick a member",
                 "`!ban @user [reason]` — Ban a member",
                 "`!unban <id>` — Unban a member",
-                "`!to @user <minutes> [reason]` — Timeout a member",
+                "`!to @user <duration> [reason]` — Timeout a member, e.g. `10`, `10m`, `1h`, `1d`",
                 "`!rto @user` — Remove a timeout",
                 "`!warn @user <reason>` — Warn a member",
                 "`!warnings @user` — View a member's warnings",
