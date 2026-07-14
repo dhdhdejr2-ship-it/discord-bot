@@ -15,7 +15,7 @@ function saveJSON(file, data) {
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
-// Guild config: { guildId: { welcomeChannel, welcomeMsg, leaveChannel, leaveMsg, modlogChannel } }
+// Guild config: { guildId: { welcomeChannel, welcomeMsg, modlogChannel } }
 function getConfig(guildId) {
   const cfg = loadJSON("config.json", {});
   return cfg[guildId] || {};
@@ -50,12 +50,70 @@ const giveaways = {
 
 const PREFIX = "!";
 const GIVEAWAY_BTN = "giveaway_enter";
-const TICKET_OPEN_BTN = "ticket_open";
-const TICKET_CLOSE_BTN = "ticket_close";
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 const EIGHT_BALL = ["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Yes.","Signs point to yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
 
 const startTime = Date.now();
+
+// ─── In-memory state ───────────────────────────────────────────────────────
+const sniped = new Map();      // channelId → { author, content, timestamp }
+const afkUsers = new Map();    // userId → { reason, since }
+const activeGames = new Map(); // userId → true (numguess lock)
+
+// ─── Game data ─────────────────────────────────────────────────────────────
+const TRIVIA = [
+  { q: "What is the capital of France?", a: "Paris", options: ["London","Paris","Berlin","Madrid"] },
+  { q: "How many sides does a hexagon have?", a: "6", options: ["5","6","7","8"] },
+  { q: "What planet is known as the Red Planet?", a: "Mars", options: ["Venus","Jupiter","Mars","Saturn"] },
+  { q: "Who painted the Mona Lisa?", a: "Leonardo da Vinci", options: ["Picasso","Michelangelo","Leonardo da Vinci","Raphael"] },
+  { q: "What is the largest ocean on Earth?", a: "Pacific Ocean", options: ["Atlantic Ocean","Indian Ocean","Pacific Ocean","Arctic Ocean"] },
+  { q: "What gas do plants absorb from the atmosphere?", a: "Carbon dioxide", options: ["Oxygen","Nitrogen","Carbon dioxide","Hydrogen"] },
+  { q: "How many continents are on Earth?", a: "7", options: ["5","6","7","8"] },
+  { q: "What is the fastest land animal?", a: "Cheetah", options: ["Lion","Cheetah","Horse","Leopard"] },
+  { q: "What is the hardest natural substance on Earth?", a: "Diamond", options: ["Gold","Iron","Diamond","Quartz"] },
+  { q: "What year did World War II end?", a: "1945", options: ["1943","1944","1945","1946"] },
+  { q: "What is the chemical symbol for water?", a: "H2O", options: ["O2","CO2","H2O","H2SO4"] },
+  { q: "How many bones are in the adult human body?", a: "206", options: ["196","206","216","226"] },
+  { q: "What is the smallest planet in our solar system?", a: "Mercury", options: ["Mars","Pluto","Mercury","Venus"] },
+  { q: "Who wrote Romeo and Juliet?", a: "Shakespeare", options: ["Dickens","Shakespeare","Tolkien","Hemingway"] },
+  { q: "What is the speed of light (approx)?", a: "300,000 km/s", options: ["150,000 km/s","300,000 km/s","500,000 km/s","1,000,000 km/s"] },
+  { q: "What language has the most native speakers?", a: "Mandarin Chinese", options: ["English","Spanish","Mandarin Chinese","Hindi"] },
+  { q: "What is the tallest mountain in the world?", a: "Mount Everest", options: ["K2","Mount Everest","Kangchenjunga","Lhotse"] },
+  { q: "How many players are on a standard soccer team?", a: "11", options: ["9","10","11","12"] },
+  { q: "What element does 'O' represent on the periodic table?", a: "Oxygen", options: ["Gold","Osmium","Oxygen","Oganesson"] },
+  { q: "What is 7 × 8?", a: "56", options: ["48","54","56","64"] },
+];
+
+const WYR = [
+  "Would you rather **fly** or be **invisible**?",
+  "Would you rather have **unlimited money** or **unlimited time**?",
+  "Would you rather **never sleep** or **never eat**?",
+  "Would you rather be **always hot** or **always cold**?",
+  "Would you rather **speak every language** or **play every instrument**?",
+  "Would you rather **live in space** or **under the ocean**?",
+  "Would you rather **know when you'll die** or **how you'll die**?",
+  "Would you rather **be a famous actor** or **a famous musician**?",
+  "Would you rather **always be late** or **always be 2 hours early**?",
+  "Would you rather **have no internet** or **no music**?",
+  "Would you rather **fight 100 duck-sized horses** or **1 horse-sized duck**?",
+  "Would you rather **lose all your money** or **lose all your memories**?",
+  "Would you rather **only whisper** or **only shout**?",
+  "Would you rather **be famous but broke** or **rich but unknown**?",
+  "Would you rather **teleport** or **time travel**?",
+];
+
+const RIDDLES = [
+  { q: "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?", a: "an echo" },
+  { q: "The more you take, the more you leave behind. What am I?", a: "footsteps" },
+  { q: "I have cities, but no houses live there. I have mountains, but no trees grow. I have water, but no fish swim. I have roads, but no cars drive. What am I?", a: "a map" },
+  { q: "What has hands but can't clap?", a: "a clock" },
+  { q: "What gets wetter the more it dries?", a: "a towel" },
+  { q: "I have a head and a tail, but no body. What am I?", a: "a coin" },
+  { q: "What has to be broken before you can use it?", a: "an egg" },
+  { q: "I'm tall when I'm young, short when I'm old. What am I?", a: "a candle" },
+  { q: "What has many teeth but can't bite?", a: "a comb" },
+  { q: "What can travel around the world while staying in a corner?", a: "a stamp" },
+];
 
 function parseDuration(s) {
   const m = s.trim().match(/^(\d+)\s*(s|m|h|d)/i);
@@ -86,6 +144,20 @@ async function logToModlog(guild, embed) {
   } catch {}
 }
 
+// Safe math evaluator (no eval)
+function safeMath(expr) {
+  const cleaned = expr.replace(/\s+/g, "");
+  if (!/^[\d+\-*/().%^]+$/.test(cleaned)) return null;
+  try {
+    // Replace ^ with ** for exponentiation
+    const safe = cleaned.replace(/\^/g, "**");
+    // Use Function constructor in a restricted way
+    const result = Function('"use strict"; return (' + safe + ')')();
+    if (typeof result !== "number" || !isFinite(result)) return null;
+    return Math.round(result * 1e10) / 1e10;
+  } catch { return null; }
+}
+
 // ─── Giveaways ─────────────────────────────────────────────────────────────
 async function endGiveaway(client, messageId) {
   const g = giveaways.get(messageId);
@@ -94,9 +166,13 @@ async function endGiveaway(client, messageId) {
   try {
     const channel = await client.channels.fetch(g.channelId);
     const message = await channel.messages.fetch(messageId);
-    const { participants, winnerCount, prize } = g;
-    if (!participants.length) { await channel.send(`🎉 Giveaway for **${prize}** ended — no one entered!`); return; }
-    const winners = [...participants].sort(() => Math.random() - 0.5).slice(0, Math.min(winnerCount, participants.length));
+    const prize = g.prize;
+    if (!g.participants.length) {
+      const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\n**Winner(s):** No participants!`).setColor(0xed4245);
+      return await message.edit({ embeds: [embed], components: [] });
+    }
+    const shuffled = [...g.participants].sort(() => Math.random() - 0.5);
+    const winners = shuffled.slice(0, g.winnerCount);
     const mentions = winners.map(id => `<@${id}>`).join(", ");
     const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\n**Winner(s):** ${mentions}`).setColor(0xffd700);
     await message.edit({ embeds: [embed], components: [] });
@@ -121,7 +197,7 @@ const client = new Client({
 
 client.once("clientReady", c => { console.log(`✅ Logged in as ${c.user.tag}`); resumeGiveaways(client); });
 
-// ─── Welcome / Leave ───────────────────────────────────────────────────────
+// ─── Welcome ───────────────────────────────────────────────────────────────
 client.on("guildMemberAdd", async member => {
   const cfg = getConfig(member.guild.id);
   const chId = cfg.welcomeChannel || process.env.WELCOME_CHANNEL_ID;
@@ -140,22 +216,41 @@ client.on("guildMemberAdd", async member => {
   } catch(e) { console.error("Welcome error:", e); }
 });
 
-client.on("guildMemberRemove", async member => {
-  const cfg = getConfig(member.guild.id);
-  const chId = cfg.leaveChannel || process.env.LEAVE_CHANNEL_ID;
-  if (!chId) return;
-  const msg = cfg.leaveMsg || `**${member.user.tag}** has left the server.`;
-  try {
-    const ch = await client.channels.fetch(chId);
-    const formatted = msg.replace(/{user}/g, member.user.tag).replace(/{username}/g, member.user.username).replace(/{tag}/g, member.user.tag).replace(/{server}/g, member.guild.name);
-    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Goodbye!").setDescription(formatted).setColor(0xed4245)] });
-  } catch(e) { console.error("Leave error:", e); }
+// ─── Snipe: track deleted messages ─────────────────────────────────────────
+client.on("messageDelete", message => {
+  if (message.author?.bot) return;
+  if (message.content) {
+    sniped.set(message.channelId, {
+      author: message.author?.tag || "Unknown",
+      avatarURL: message.author?.displayAvatarURL() || null,
+      content: message.content,
+      timestamp: Date.now(),
+    });
+  }
+});
+
+// ─── AFK: detect when AFK user speaks ─────────────────────────────────────
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild) return;
+  // If AFK user sends a message, clear their AFK
+  if (afkUsers.has(message.author.id)) {
+    afkUsers.delete(message.author.id);
+    const m = await message.reply(`👋 Welcome back, **${message.author.username}**! Your AFK has been removed.`).catch(()=>null);
+    if (m) setTimeout(() => m.delete().catch(()=>{}), 5000);
+  }
+  // If someone mentions an AFK user, notify
+  for (const user of message.mentions.users.values()) {
+    if (afkUsers.has(user.id)) {
+      const { reason, since } = afkUsers.get(user.id);
+      await message.reply(`💤 **${user.username}** is AFK: ${reason} (since <t:${Math.floor(since/1000)}:R>)`).catch(()=>{});
+    }
+  }
 });
 
 // ─── Buttons ───────────────────────────────────────────────────────────────
 client.on("interactionCreate", async interaction => {
   if (!interaction.isButton()) return;
-  const { customId, user, guild } = interaction;
+  const { customId, user } = interaction;
 
   if (customId === GIVEAWAY_BTN) {
     const g = giveaways.get(interaction.message.id);
@@ -163,32 +258,6 @@ client.on("interactionCreate", async interaction => {
     if (g.participants.includes(user.id)) return interaction.reply({ content: "You're already entered!", ephemeral: true });
     giveaways.update(g.messageId, { participants: [...g.participants, user.id] });
     return interaction.reply({ content: "🎉 You're entered in the giveaway!", ephemeral: true });
-  }
-
-  if (customId === TICKET_OPEN_BTN) {
-    if (!guild) return;
-    const existing = guild.channels.cache.find(c => c.name === `ticket-${user.username.toLowerCase()}`);
-    if (existing) return interaction.reply({ content: `You already have a ticket: ${existing}`, ephemeral: true });
-    const cfg = getConfig(guild.id);
-    const ch = await guild.channels.create({
-      name: `ticket-${user.username.toLowerCase()}`,
-      parent: cfg.ticketCategory || process.env.TICKET_CATEGORY_ID || undefined,
-      permissionOverwrites: [
-        { id: guild.roles.everyone, deny: ["ViewChannel"] },
-        { id: user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
-        ...(cfg.ticketRole ? [{ id: cfg.ticketRole, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
-        { id: client.user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
-      ],
-    });
-    await ch.send({ content: `${user} Welcome! Staff will be with you shortly.`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(TICKET_CLOSE_BTN).setLabel("🔒 Close Ticket").setStyle(ButtonStyle.Danger))] });
-    return interaction.reply({ content: `Ticket opened: ${ch}`, ephemeral: true });
-  }
-
-  if (customId === TICKET_CLOSE_BTN) {
-    if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels) && !interaction.channel.name.endsWith(user.username.toLowerCase()))
-      return interaction.reply({ content: "You can't close this ticket.", ephemeral: true });
-    await interaction.reply("🔒 Closing ticket in 5 seconds...");
-    setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
   }
 });
 
@@ -199,16 +268,38 @@ client.on("messageCreate", async message => {
   const cmd = args.shift()?.toLowerCase();
   if (!cmd) return;
 
-  const targetUser = message.mentions.users.first();
-  const targetMember = message.mentions.members?.first();
+  const targetUser = message.mentions.users.first() || null;
+  const targetMember = targetUser ? await message.guild.members.fetch(targetUser.id).catch(()=>null) : null;
 
   try {
     switch (cmd) {
 
-      // ── Info ──────────────────────────────────────────────────────────────
+      // ── General ──────────────────────────────────────────────────────────
       case "ping": {
-        const sent = await message.reply("🏓 Pinging...");
-        await sent.edit(`🏓 Pong! Latency: **${sent.createdTimestamp - message.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**`);
+        const sent = await message.reply("Pinging...");
+        sent.edit(`🏓 Pong! Latency: **${sent.createdTimestamp - message.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**`);
+        break;
+      }
+      case "botinfo": {
+        const embed = new EmbedBuilder()
+          .setTitle(`🤖 ${client.user.username} Info`)
+          .setThumbnail(client.user.displayAvatarURL({ size: 256 }))
+          .setColor(0x5865f2)
+          .addFields(
+            { name: "Uptime", value: formatUptime(Date.now() - startTime), inline: true },
+            { name: "Servers", value: `${client.guilds.cache.size}`, inline: true },
+            { name: "Users", value: `${client.users.cache.size}`, inline: true },
+            { name: "Ping", value: `${Math.round(client.ws.ping)}ms`, inline: true },
+            { name: "Library", value: "discord.js v14", inline: true },
+            { name: "Node.js", value: process.version, inline: true },
+          )
+          .setFooter({ text: "CRIMSON EM#9236" })
+          .setTimestamp();
+        await message.reply({ embeds: [embed] });
+        break;
+      }
+      case "uptime": {
+        await message.reply(`⏱️ Bot has been online for **${formatUptime(Date.now() - startTime)}**`);
         break;
       }
       case "userinfo": {
@@ -255,8 +346,64 @@ client.on("messageCreate", async message => {
         await message.reply(`👥 **${message.guild.name}** has **${message.guild.memberCount}** members.`);
         break;
       }
-      case "uptime": {
-        await message.reply(`⏱️ Bot has been online for **${formatUptime(Date.now() - startTime)}**`);
+
+      // ── Utility ──────────────────────────────────────────────────────────
+      case "poll": {
+        const parts = message.content.slice(PREFIX.length + "poll".length).trim().split("|").map(p=>p.trim()).filter(Boolean);
+        if (parts.length < 3) return void message.reply("Usage: `!poll Question? | Option 1 | Option 2`");
+        const [question, ...options] = parts;
+        if (options.length > 5) return void message.reply("Max 5 options per poll.");
+        const embed = new EmbedBuilder()
+          .setTitle(`📊 ${question}`)
+          .setDescription(options.map((o,i)=>`${NUMBER_EMOJI[i]} ${o}`).join("\n"))
+          .setColor(0x5865f2)
+          .setFooter({ text: `Poll by ${message.author.tag}` });
+        const poll = await message.channel.send({ embeds: [embed] });
+        for (let i = 0; i < options.length; i++) await poll.react(NUMBER_EMOJI[i]);
+        if (message.deletable) await message.delete().catch(()=>{});
+        break;
+      }
+      case "math": {
+        const expr = args.join(" ");
+        if (!expr) return void message.reply("Usage: `!math <expression>` — e.g. `!math 5 * (3 + 2)^2`");
+        const result = safeMath(expr);
+        if (result === null) return void message.reply("❌ Invalid or unsafe expression. Only numbers and `+ - * / % ^ ( )` allowed.");
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("🧮 Math").setDescription(`**Expression:** \`${expr}\`\n**Result:** \`${result}\``).setColor(0x5865f2)] });
+        break;
+      }
+      case "remind": {
+        const timeStr = args[0];
+        const reminder = args.slice(1).join(" ");
+        if (!timeStr || !reminder) return void message.reply("Usage: `!remind <time> <message>` — e.g. `!remind 10m Take a break`");
+        const ms = parseDuration(timeStr);
+        if (!ms) return void message.reply("Invalid time. Use: `10s`, `5m`, `2h`, `1d`");
+        if (ms > 86400000 * 7) return void message.reply("Max reminder time is 7 days.");
+        await message.reply(`✅ Got it! I'll remind you about **${reminder}** in **${timeStr}**.`);
+        setTimeout(async () => {
+          try {
+            await message.author.send({ embeds: [new EmbedBuilder().setTitle("⏰ Reminder!").setDescription(reminder).setColor(0xffd700).setFooter({ text: `Set in ${message.guild.name}` }).setTimestamp()] });
+          } catch {
+            await message.channel.send(`⏰ ${message.author}, reminder: **${reminder}**`).catch(()=>{});
+          }
+        }, ms);
+        break;
+      }
+      case "snipe": {
+        const data = sniped.get(message.channel.id);
+        if (!data) return void message.reply("Nothing to snipe! No recently deleted messages in this channel.");
+        const embed = new EmbedBuilder()
+          .setTitle("🔫 Sniped!")
+          .setDescription(data.content)
+          .setColor(0xed4245)
+          .setAuthor({ name: data.author, iconURL: data.avatarURL || undefined })
+          .setFooter({ text: `Deleted ${Math.floor((Date.now() - data.timestamp) / 1000)}s ago` });
+        await message.reply({ embeds: [embed] });
+        break;
+      }
+      case "afk": {
+        const reason = args.join(" ") || "AFK";
+        afkUsers.set(message.author.id, { reason, since: Date.now() });
+        await message.reply(`💤 You're now AFK: **${reason}**`);
         break;
       }
 
@@ -279,30 +426,126 @@ client.on("messageCreate", async message => {
         await message.reply(`🪙 **${Math.random() < 0.5 ? "Heads" : "Tails"}**!`);
         break;
 
-      // ── Utility ───────────────────────────────────────────────────────────
-      case "poll": {
-        const parts = message.content.slice(PREFIX.length + "poll".length).trim().split("|").map(p=>p.trim()).filter(Boolean);
-        if (parts.length < 3) return void message.reply("Usage: `!poll Question? | Option 1 | Option 2`");
-        const [question, ...options] = parts;
-        const sent = await message.channel.send({ embeds: [new EmbedBuilder().setTitle(`📊 ${question}`).setColor(0x5865f2).setDescription(options.slice(0,5).map((o,i)=>`${NUMBER_EMOJI[i]} ${o}`).join("\n")).setFooter({ text: `Poll by ${message.author.tag}` })] });
-        for (let i = 0; i < Math.min(options.length, 5); i++) await sent.react(NUMBER_EMOJI[i]);
+      // ── Games ─────────────────────────────────────────────────────────────
+      case "rps": {
+        const choices = ["rock","paper","scissors"];
+        const emojis = { rock: "🪨", paper: "📄", scissors: "✂️" };
+        const userChoice = args[0]?.toLowerCase();
+        if (!choices.includes(userChoice)) return void message.reply("Usage: `!rps <rock|paper|scissors>`");
+        const botChoice = choices[Math.floor(Math.random() * 3)];
+        let result;
+        if (userChoice === botChoice) result = "🤝 It's a **tie**!";
+        else if ((userChoice==="rock"&&botChoice==="scissors")||(userChoice==="paper"&&botChoice==="rock")||(userChoice==="scissors"&&botChoice==="paper"))
+          result = "🎉 You **win**!";
+        else result = "😢 You **lose**!";
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("✊ Rock Paper Scissors")
+          .setDescription(`You: ${emojis[userChoice]} **${userChoice}**\nBot: ${emojis[botChoice]} **${botChoice}**\n\n${result}`)
+          .setColor(result.includes("win") ? 0x57f287 : result.includes("lose") ? 0xed4245 : 0xffd700)] });
         break;
       }
-      case "remindme": {
-        const mins = Number(args[0]);
-        const reminderMsg = args.slice(1).join(" ");
-        if (!mins || !reminderMsg) return void message.reply("Usage: `!remindme <minutes> <message>`");
-        await message.reply(`⏰ I'll remind you in **${mins} minute(s)**!`);
-        setTimeout(async () => {
-          try { await message.author.send(`⏰ Reminder: **${reminderMsg}**`); }
-          catch { await message.channel.send(`⏰ ${message.author}, reminder: **${reminderMsg}**`); }
-        }, mins * 60000);
+      case "slots": {
+        const symbols = ["🍒","🍋","🍊","🍇","⭐","💎","7️⃣"];
+        const s = () => symbols[Math.floor(Math.random() * symbols.length)];
+        const [a, b, c] = [s(), s(), s()];
+        const win = a === b && b === c;
+        const twoMatch = a === b || b === c || a === c;
+        let resultText = win ? "🎉 **JACKPOT! You hit three of a kind!**" : twoMatch ? "✨ **Two of a kind! Almost there!**" : "❌ **No match. Try again!**";
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🎰 Slots")
+          .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}`)
+          .setColor(win ? 0xffd700 : twoMatch ? 0x57f287 : 0x99aab5)] });
         break;
       }
+      case "trivia": {
+        const q = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
+        const shuffled = [...q.options].sort(() => Math.random() - 0.5);
+        const letters = ["A","B","C","D"];
+        const choiceMap = Object.fromEntries(shuffled.map((opt, i) => [letters[i], opt]));
+        const correctLetter = Object.keys(choiceMap).find(k => choiceMap[k] === q.a);
+        const optionsText = Object.entries(choiceMap).map(([l, v]) => `**${l})** ${v}`).join("\n");
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🧠 Trivia")
+          .setDescription(`${q.q}\n\n${optionsText}\n\n*Type A, B, C, or D to answer — you have 15 seconds!*`)
+          .setColor(0x5865f2)] });
+        const filter = m => m.author.id === message.author.id && ["a","b","c","d"].includes(m.content.toLowerCase());
+        const collector = message.channel.createMessageCollector({ filter, time: 15000, max: 1 });
+        collector.on("collect", async m => {
+          const answered = m.content.toUpperCase();
+          if (answered === correctLetter)
+            await message.channel.send(`✅ **Correct!** The answer was **${q.a}**. Well done, ${message.author}!`);
+          else
+            await message.channel.send(`❌ **Wrong!** The correct answer was **${correctLetter}) ${q.a}**. Better luck next time, ${message.author}!`);
+        });
+        collector.on("end", (collected) => {
+          if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${correctLetter}) ${q.a}**.`).catch(()=>{});
+        });
+        break;
+      }
+      case "wyr": {
+        const prompt = WYR[Math.floor(Math.random() * WYR.length)];
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🤔 Would You Rather...")
+          .setDescription(prompt)
+          .setColor(0xf5a623)
+          .setFooter({ text: "Reply in chat with your choice!" })] });
+        break;
+      }
+      case "riddle": {
+        const riddle = RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🧩 Riddle")
+          .setDescription(`${riddle.q}\n\n*Type your answer — you have 30 seconds!*`)
+          .setColor(0x9b59b6)] });
+        const filter = m => m.author.id === message.author.id;
+        const collector = message.channel.createMessageCollector({ filter, time: 30000, max: 1 });
+        collector.on("collect", async m => {
+          if (m.content.toLowerCase().includes(riddle.a.toLowerCase()))
+            await message.channel.send(`✅ **Correct!** The answer was **${riddle.a}**. Great job, ${message.author}!`);
+          else
+            await message.channel.send(`❌ **Not quite!** The answer was **${riddle.a}**. Good try, ${message.author}!`);
+        });
+        collector.on("end", (collected) => {
+          if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${riddle.a}**.`).catch(()=>{});
+        });
+        break;
+      }
+      case "numguess": {
+        if (activeGames.has(message.author.id)) return void message.reply("You already have an active guessing game!");
+        const target = Math.floor(Math.random() * 100) + 1;
+        let attempts = 0;
+        activeGames.set(message.author.id, true);
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🔢 Number Guessing Game")
+          .setDescription("I'm thinking of a number between **1 and 100**.\nYou have **7 attempts** — type your guesses in chat!")
+          .setColor(0x5865f2)] });
+        const filter = m => m.author.id === message.author.id && !isNaN(m.content) && m.content.trim() !== "";
+        const collector = message.channel.createMessageCollector({ filter, time: 60000, max: 7 });
+        collector.on("collect", async m => {
+          attempts++;
+          const guess = Number(m.content.trim());
+          const remaining = 7 - attempts;
+          if (guess === target) {
+            collector.stop("win");
+            activeGames.delete(message.author.id);
+            await m.reply(`🎉 **Correct!** The number was **${target}**! You got it in **${attempts}** attempt(s)!`);
+          } else if (remaining === 0) {
+            collector.stop("lose");
+          } else {
+            await m.reply(`${guess < target ? "📈 Too low!" : "📉 Too high!"} **${remaining}** attempt(s) left.`);
+          }
+        });
+        collector.on("end", (_, reason) => {
+          activeGames.delete(message.author.id);
+          if (reason !== "win") message.channel.send(`💀 Game over! The number was **${target}**. Better luck next time!`).catch(()=>{});
+        });
+        break;
+      }
+
+      // ── Admin ─────────────────────────────────────────────────────────────
       case "say": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         const parts = message.content.slice(PREFIX.length + "say".length).trim();
-        // Support: !say #channel message OR !say message
         let targetCh = message.channel;
         let text = parts;
         if (message.mentions.channels.size) {
@@ -357,52 +600,6 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Preview sent!");
         break;
       }
-      case "setleave": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
-        const ch = message.mentions.channels.first();
-        const msg = message.content.slice(PREFIX.length + "setleave".length).replace(/<#\d+>/, "").trim();
-        if (!ch) return void message.reply("Usage: `!setleave #channel <message>` — use {user}, {server}");
-        setConfig(message.guild.id, { leaveChannel: ch.id, leaveMsg: msg || undefined });
-        await message.reply(`✅ Leave messages will be sent to ${ch}`);
-        break;
-      }
-      case "testleave": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
-        const cfg = getConfig(message.guild.id);
-        const chId = cfg.leaveChannel || process.env.LEAVE_CHANNEL_ID;
-        if (!chId) return void message.reply("No leave channel set. Use `!setleave #channel` first.");
-        const msg = cfg.leaveMsg || `**${message.author.tag}** has left the server.`;
-        const ch = await client.channels.fetch(chId);
-        await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Goodbye!").setDescription(msg.replace("{user}", message.author.tag).replace("{server}", message.guild.name)).setColor(0xed4245).setFooter({ text: "This is a preview" })] });
-        await message.reply("✅ Preview sent!");
-        break;
-      }
-      case "ticketsetup": case "ticket-setup": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        // Support: !ticketsetup <category-id> @role   OR just !ticketsetup
-        const categoryId = args.find(a => /^\d{17,19}$/.test(a));
-        const role = message.mentions.roles.first();
-        if (categoryId || role) {
-          setConfig(message.guild.id, {
-            ...(categoryId ? { ticketCategory: categoryId } : {}),
-            ...(role ? { ticketRole: role.id } : {}),
-          });
-          await message.reply(`✅ Ticket config updated.${categoryId ? ` Category: \`${categoryId}\`` : ""}${role ? ` Staff role: ${role}` : ""}`);
-        } else {
-          // Just post the panel
-          const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(TICKET_OPEN_BTN).setLabel("🎫 Open Ticket").setStyle(ButtonStyle.Primary));
-          await message.channel.send({ embeds: [new EmbedBuilder().setTitle("Need help?").setDescription("Click the button below to open a private support ticket.").setColor(0x5865f2)], components: [row] });
-        }
-        break;
-      }
-      case "ticketpanel": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(TICKET_OPEN_BTN).setLabel("🎫 Open Ticket").setStyle(ButtonStyle.Primary));
-        const title = args.join(" ") || "Need help?";
-        await message.channel.send({ embeds: [new EmbedBuilder().setTitle(title).setDescription("Click the button below to open a private support ticket.").setColor(0x5865f2)], components: [row] });
-        if (message.deletable) await message.delete().catch(()=>{});
-        break;
-      }
       case "setmodlog": {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
@@ -413,41 +610,39 @@ client.on("messageCreate", async message => {
       }
 
       // ── Moderation ────────────────────────────────────────────────────────
-      case "ban": {
-        if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
-        if (!targetMember) return void message.reply("Usage: `!ban @user [reason]`");
-        if (!targetMember.bannable) return void message.reply("I can't ban that member.");
-        const reason = args.slice(1).join(" ") || "No reason provided";
-        await message.guild.members.ban(targetMember.id, { reason });
-        await message.reply(`🔨 Banned **${targetUser.tag}** — ${reason}`);
-        await logToModlog(message.guild, new EmbedBuilder().setTitle("🔨 Member Banned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xed4245).setTimestamp());
-        break;
-      }
-      case "unban": {
-        if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
-        const uid = args[0]; if (!uid) return void message.reply("Usage: `!unban <user_id>`");
-        await message.guild.members.unban(uid, args.slice(1).join(" ") || "No reason");
-        await message.reply(`✅ Unbanned \`${uid}\``);
-        break;
-      }
       case "kick": {
         if (!requirePerm(message, PermissionFlagsBits.KickMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!kick @user [reason]`");
-        if (!targetMember.kickable) return void message.reply("I can't kick that member.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await targetMember.kick(reason);
         await message.reply(`👢 Kicked **${targetUser.tag}** — ${reason}`);
         await logToModlog(message.guild, new EmbedBuilder().setTitle("👢 Member Kicked").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
+      case "ban": {
+        if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
+        if (!targetUser) return void message.reply("Usage: `!ban @user [reason]`");
+        const reason = args.slice(1).join(" ") || "No reason provided";
+        await message.guild.members.ban(targetUser.id, { reason });
+        await message.reply(`🔨 Banned **${targetUser.tag}** — ${reason}`);
+        await logToModlog(message.guild, new EmbedBuilder().setTitle("🔨 Member Banned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xed4245).setTimestamp());
+        break;
+      }
+      case "unban": {
+        if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
+        const userId = args[0];
+        if (!userId) return void message.reply("Usage: `!unban <user-id>`");
+        await message.guild.members.unban(userId);
+        await message.reply(`✅ Unbanned user with ID **${userId}**`);
+        break;
+      }
       case "timeout": case "to": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         const mins = Number(args[1]);
-        if (!targetMember || !mins) return void message.reply("Usage: `!timeout @user <minutes> [reason]`");
-        if (!targetMember.moderatable) return void message.reply("I can't timeout that member.");
+        if (!targetMember || isNaN(mins) || mins < 1) return void message.reply("Usage: `!to @user <minutes> [reason]`");
         const reason = args.slice(2).join(" ") || "No reason provided";
         await targetMember.timeout(mins * 60000, reason);
-        await message.reply(`⏱️ Timed out **${targetUser.tag}** for ${mins} min — ${reason}`);
+        await message.reply(`⏱️ Timed out **${targetUser.tag}** for **${mins}m** — ${reason}`);
         await logToModlog(message.guild, new EmbedBuilder().setTitle("⏱️ Member Timed Out").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Duration", value: `${mins} min`, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
@@ -483,27 +678,6 @@ client.on("messageCreate", async message => {
         await message.reply(`🧼 Cleared ${warnings.clear(message.guild.id, targetUser.id)} warning(s) for **${targetUser.tag}**`);
         break;
       }
-      case "slowmode": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        const secs = Number(args[0]);
-        if (isNaN(secs) || secs < 0 || secs > 21600) return void message.reply("Usage: `!slowmode <seconds>` (0 to disable, max 21600)");
-        await message.channel.setRateLimitPerUser(secs);
-        await message.reply(secs === 0 ? "✅ Slowmode disabled." : `✅ Slowmode set to **${secs} second(s)**.`);
-        break;
-      }
-      case "clear":
-      case "purge": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
-        const amount = Number(args[0]);
-        if (!amount || amount < 1 || amount > 100) return void message.reply("Usage: `!purge <1-100> [@user]`");
-        let msgs = await message.channel.messages.fetch({ limit: 100 });
-        if (targetUser) msgs = msgs.filter(m => m.author.id === targetUser.id);
-        const toDelete = [...msgs.values()].slice(0, amount + 1);
-        const deleted = await message.channel.bulkDelete(toDelete, true);
-        const n = await message.channel.send(`🧹 Deleted ${deleted.size - 1} message(s)${targetUser ? ` from **${targetUser.tag}**` : ""}.`);
-        setTimeout(() => n.delete().catch(()=>{}), 4000);
-        break;
-      }
       case "lock": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false });
@@ -516,61 +690,100 @@ client.on("messageCreate", async message => {
         await message.reply("🔓 Channel unlocked.");
         break;
       }
-
-      // ── Giveaway ──────────────────────────────────────────────────────────
-      case "giveaway": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
-        const ms = parseDuration(args[0] || "");
-        const winnerCount = Number(args[1]);
-        const prize = args.slice(2).join(" ");
-        if (!ms || !winnerCount || !prize) return void message.reply("Usage: `!giveaway <duration e.g. 10m> <winners> <prize>`");
-        const endsAt = new Date(Date.now() + ms);
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("🎉 Enter").setStyle(ButtonStyle.Success));
-        const sent = await message.channel.send({ embeds: [new EmbedBuilder().setTitle("🎉 Giveaway!").setColor(0x57f287).setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerCount}\nEnds <t:${Math.floor(endsAt.getTime()/1000)}:R>`).setFooter({ text: `Hosted by ${message.author.tag}` })], components: [row] });
-        giveaways.add({ messageId: sent.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount, endsAt: endsAt.toISOString(), participants: [], ended: false });
-        scheduleGiveaway(client, sent.id, ms);
+      case "slowmode": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
+        const secs = Number(args[0]);
+        if (isNaN(secs) || secs < 0 || secs > 21600) return void message.reply("Usage: `!slowmode <seconds>` (0 to disable, max 21600)");
+        await message.channel.setRateLimitPerUser(secs);
+        await message.reply(secs === 0 ? "✅ Slowmode disabled." : `✅ Slowmode set to **${secs} second(s)**.`);
+        break;
+      }
+      case "clear": case "purge": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        const amount = Number(args[0]);
+        if (!amount || amount < 1 || amount > 100) return void message.reply("Usage: `!purge <1-100> [@user]`");
+        let msgs = await message.channel.messages.fetch({ limit: 100 });
+        if (targetUser) msgs = msgs.filter(m => m.author.id === targetUser.id);
+        const toDelete = [...msgs.values()].slice(0, amount);
+        await message.channel.bulkDelete(toDelete, true).catch(()=>{});
+        const reply = await message.channel.send(`🗑️ Deleted **${toDelete.length}** message(s).`);
+        setTimeout(() => reply.delete().catch(()=>{}), 3000);
         break;
       }
 
-      // ── Help ──────────────────────────────────────────────────────────────
+      // ── Giveaway ─────────────────────────────────────────────────────────
+      case "giveaway": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        const [durStr, winStr, ...prizeArr] = args;
+        const prize = prizeArr.join(" ");
+        const ms = parseDuration(durStr || "");
+        const winCount = Number(winStr);
+        if (!ms || !winCount || !prize) return void message.reply("Usage: `!giveaway <duration> <winners> <prize>` — e.g. `!giveaway 10m 1 Nitro`");
+        const endsAt = new Date(Date.now() + ms).toISOString();
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("🎉 Enter Giveaway").setStyle(ButtonStyle.Primary));
+        const embed = new EmbedBuilder()
+          .setTitle("🎁 Giveaway!")
+          .setDescription(`**Prize:** ${prize}\n**Winners:** ${winCount}\n**Ends:** <t:${Math.floor((Date.now()+ms)/1000)}:R>`)
+          .setColor(0xffd700)
+          .setFooter({ text: `Hosted by ${message.author.tag}` })
+          .setTimestamp(Date.now() + ms);
+        const gMsg = await message.channel.send({ embeds: [embed], components: [row] });
+        giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
+        scheduleGiveaway(client, gMsg.id, ms);
+        await message.reply(`✅ Giveaway started!`);
+        break;
+      }
+
+      // ── Help ─────────────────────────────────────────────────────────────
       case "help": {
         const embed = new EmbedBuilder()
-          .setTitle("📋 Bot Commands")
+          .setTitle("📖 Command List")
           .setColor(0x5865f2)
           .addFields(
             {
-              name: "ℹ️ Info",
+              name: "📌 General",
               value: [
-                "`!ping` — Check bot latency",
-                "`!userinfo [@user]` — User information",
-                "`!serverinfo` — Server information",
+                "`!ping` — Bot latency",
+                "`!botinfo` — Bot stats and info",
+                "`!uptime` — How long the bot has been online",
+                "`!userinfo [@user]` — View user info",
+                "`!serverinfo` — View server info",
                 "`!avatar [@user]` — Get a user's avatar",
                 "`!membercount` — Server member count",
-                "`!uptime` — How long the bot has been running",
-              ].join("\n"),
-            },
-            {
-              name: "🎉 Fun",
-              value: [
-                "`!8ball <question>` — Ask the magic 8-ball",
-                "`!roll [sides] [count]` — Roll dice",
-                "`!coinflip` — Flip a coin",
               ].join("\n"),
             },
             {
               name: "🔧 Utility",
               value: [
-                "`!poll <question> | <opt1> | <opt2>` — Create a poll",
-                "`!remindme <minutes> <message>` — Set a DM reminder",
+                "`!poll Question? | A | B` — Create a poll (up to 5 options)",
+                "`!math <expression>` — Calculate math (e.g. `!math 5^2 + 3*4`)",
+                "`!remind <time> <message>` — Set a reminder (e.g. `!remind 10m Drink water`)",
+                "`!snipe` — Show the last deleted message in this channel",
+                "`!afk [reason]` — Set your AFK status",
+              ].join("\n"),
+            },
+            {
+              name: "🎮 Games",
+              value: [
+                "`!rps <rock|paper|scissors>` — Rock Paper Scissors vs bot",
+                "`!coinflip` — Flip a coin",
+                "`!roll [sides] [count]` — Roll dice (default: 1d6)",
+                "`!slots` — Spin the slot machine",
+                "`!trivia` — Answer a random trivia question",
+                "`!wyr` — Would You Rather prompt",
+                "`!riddle` — Solve a riddle",
+                "`!numguess` — Guess a number 1-100 (7 attempts)",
+                "`!8ball <question>` — Ask the magic 8-ball",
+              ].join("\n"),
+            },
+            {
+              name: "⚙️ Admin",
+              value: [
                 "`!say [#channel] <message>` — Make the bot say something",
                 "`!announce #channel <title> | <message>` — Post an announcement",
                 "`!role <add|remove> @user @role` — Add or remove a role",
-                "`!setwelcome #channel <message>` — Set welcome message",
-                "`!testwelcome` — Preview welcome message",
-                "`!setleave #channel <message>` — Set leave message",
-                "`!testleave` — Preview leave message",
-                "`!ticketsetup <category-id> [@role]` — Configure ticket system",
-                "`!ticketpanel [title]` — Post the ticket panel",
+                "`!setwelcome #channel <message>` — Set welcome message (`{user}`, `{server}`, `{count}`)",
+                "`!testwelcome` — Preview the welcome message",
                 "`!setmodlog #channel` — Set the mod log channel",
               ].join("\n"),
             },
