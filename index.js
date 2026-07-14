@@ -666,16 +666,8 @@ client.on("messageCreate", async message => {
       case "role": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
 
-        const raw = message.content.slice(PREFIX.length + "role".length).trim();
-        let sub = null;
-        let rest = raw;
-        const subMatch = raw.match(/^(add|remove)\s+/i);
-        if (subMatch) {
-          sub = subMatch[1].toLowerCase();
-          rest = raw.slice(subMatch[0].length).trim();
-        }
-
-        const usage = "Usage: `!role [add|remove] <user> | <role>`\nExamples:\n`!role add Sam | Moderator` — add by name, no ping\n`!role remove @Sam | Moderator`\n`!role @Sam | Moderator` — toggle (adds if missing, removes if present)";
+        const rest = message.content.slice(PREFIX.length + "role".length).trim();
+        const usage = "Usage: `!role <user> | <role>`\nExample: `!role Sam | Moderator` — adds it if Sam doesn't have it, removes it if he does. No ping needed — you can use a name instead of @mentioning.";
         if (!rest) return void message.reply(usage);
 
         let userPart, rolePart;
@@ -698,16 +690,12 @@ client.on("messageCreate", async message => {
         if (!role.editable) return void message.reply(`I can't manage **${role.name}** — it's above my highest role, or I'm missing the **Manage Roles** permission.`);
 
         const hasRole = member.roles.cache.has(role.id);
-        const action = sub || (hasRole ? "remove" : "add");
-
-        if (action === "add") {
-          if (hasRole) return void message.reply({ content: `**${member.user.tag}** already has **${role.name}**.`, allowedMentions: { parse: [] } });
-          await member.roles.add(role);
-          await message.reply({ content: `✅ Added **${role.name}** to **${member.user.tag}**`, allowedMentions: { parse: [] } });
-        } else {
-          if (!hasRole) return void message.reply({ content: `**${member.user.tag}** doesn't have **${role.name}**.`, allowedMentions: { parse: [] } });
+        if (hasRole) {
           await member.roles.remove(role);
           await message.reply({ content: `✅ Removed **${role.name}** from **${member.user.tag}**`, allowedMentions: { parse: [] } });
+        } else {
+          await member.roles.add(role);
+          await message.reply({ content: `✅ Added **${role.name}** to **${member.user.tag}**`, allowedMentions: { parse: [] } });
         }
         break;
       }
@@ -978,7 +966,7 @@ client.on("messageCreate", async message => {
               value: [
                 "`!say [#channel] <message>` — Make the bot say something",
                 "`!announce #channel <title> | <message>` — Post an announcement",
-                "`!role [add|remove] <user> | <role>` — Manage a role by name or mention (no ping needed), e.g. `!role add Sam | Moderator`",
+                "`!role <user> | <role>` — Toggle a role by name or mention (no ping needed), e.g. `!role Sam | Moderator`",
                 "`!setwelcome #channel <message>` — Set welcome message",
                 "`!testwelcome` — Preview the welcome message",
                 "`!ticketsetup <category-id> [@staff-role]` — Configure ticket system",
