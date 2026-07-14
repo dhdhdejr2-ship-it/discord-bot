@@ -793,13 +793,15 @@ client.on("messageCreate", async message => {
       case "ticketsetup": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         const categoryId = args.find(a => /^\d{17,19}$/.test(a));
-        const role = message.mentions.roles.first();
-        if (!categoryId && !role) return void message.reply("Usage: `!ticketsetup <category-id> [@staff-role]`");
+        // Role can be given as a mention, a raw ID, or just its name — no ping required.
+        const roleQuery = args.filter(a => a !== categoryId).join(" ");
+        const role = message.mentions.roles.first() || resolveRole(message.guild, roleQuery);
+        if (!categoryId && !role) return void message.reply("Usage: `!ticketsetup <category-id> [staff-role name or ID]`");
         setConfig(message.guild.id, {
           ...(categoryId ? { ticketCategory: categoryId } : {}),
           ...(role ? { ticketRole: role.id } : {}),
         });
-        await message.reply(`✅ Ticket config updated.${categoryId ? ` Category: \`${categoryId}\`` : ""}${role ? ` Staff role: ${role}` : ""}`);
+        await message.reply({ content: `✅ Ticket config updated.${categoryId ? ` Category: \`${categoryId}\`` : ""}${role ? ` Staff role: **${role.name}**` : ""}`, allowedMentions: { parse: [] } });
         break;
       }
       case "ticketpanel": {
@@ -1044,7 +1046,7 @@ client.on("messageCreate", async message => {
                 "`!role <user> | <role>` — Toggle a role by name or mention (no ping needed), e.g. `!role Sam | Moderator`",
                 "`!setwelcome #channel <message>` — Set welcome message",
                 "`!testwelcome` — Preview the welcome message",
-                "`!ticketsetup <category-id> [@staff-role]` — Configure ticket system",
+                "`!ticketsetup <category-id> [staff-role name or ID]` — Configure ticket system",
                 "`!ticketpanel` — Post the ticket panel with dropdown",
                 "`!setmodlog #channel` — Set the mod log channel",
               ].join("\n"),
