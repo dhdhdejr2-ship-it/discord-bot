@@ -57,13 +57,45 @@ const reminders = {
   all() { return loadJSON("reminders.json"); },
 };
 
+// ─── Casino economy ─────────────────────────────────────────────────────────
+// Per-guild, per-user wallets: { "guildId:userId": { balance, lastDaily, lastWork, lastSteal } }
+const STARTING_BALANCE = 500;
+const economy = {
+  key(guildId, userId) { return `${guildId}:${userId}`; },
+  get(guildId, userId) {
+    const d = loadJSON("economy.json", {});
+    const k = this.key(guildId, userId);
+    if (!d[k]) { d[k] = { balance: STARTING_BALANCE, lastDaily: 0, lastWork: 0, lastSteal: 0 }; saveJSON("economy.json", d); }
+    return d[k];
+  },
+  set(guildId, userId, changes) {
+    const d = loadJSON("economy.json", {});
+    const k = this.key(guildId, userId);
+    d[k] = { ...(d[k] || { balance: STARTING_BALANCE, lastDaily: 0, lastWork: 0, lastSteal: 0 }), ...changes };
+    saveJSON("economy.json", d);
+    return d[k];
+  },
+  add(guildId, userId, amount) {
+    const acc = this.get(guildId, userId);
+    return this.set(guildId, userId, { balance: Math.max(0, acc.balance + amount) });
+  },
+  top(guildId, limit = 10) {
+    const d = loadJSON("economy.json", {});
+    return Object.entries(d)
+      .filter(([k]) => k.startsWith(`${guildId}:`))
+      .map(([k, v]) => ({ userId: k.split(":")[1], balance: v.balance }))
+      .sort((a, b) => b.balance - a.balance)
+      .slice(0, limit);
+  },
+};
+function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
+
 const PREFIX = "!";
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
 const TICKET_CLOSE   = "ticket_close";
 
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
-const EIGHT_BALL = ["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Yes.","Signs point to yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
 
 const TICKET_CATEGORIES = {
   access:  { label: "🔐 Access",  description: "Request access to something",  color: 0xe91e8c },
@@ -76,62 +108,6 @@ const startTime = Date.now();
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
 const afkUsers   = new Map(); // userId    → { reason, since }
-const activeGames = new Map(); // userId   → true
-
-// ─── Game data ─────────────────────────────────────────────────────────────
-const TRIVIA = [
-  { q: "What is the capital of France?", a: "Paris", options: ["London","Paris","Berlin","Madrid"] },
-  { q: "How many sides does a hexagon have?", a: "6", options: ["5","6","7","8"] },
-  { q: "What planet is known as the Red Planet?", a: "Mars", options: ["Venus","Jupiter","Mars","Saturn"] },
-  { q: "Who painted the Mona Lisa?", a: "Leonardo da Vinci", options: ["Picasso","Michelangelo","Leonardo da Vinci","Raphael"] },
-  { q: "What is the largest ocean on Earth?", a: "Pacific Ocean", options: ["Atlantic Ocean","Indian Ocean","Pacific Ocean","Arctic Ocean"] },
-  { q: "What gas do plants absorb from the atmosphere?", a: "Carbon dioxide", options: ["Oxygen","Nitrogen","Carbon dioxide","Hydrogen"] },
-  { q: "How many continents are on Earth?", a: "7", options: ["5","6","7","8"] },
-  { q: "What is the fastest land animal?", a: "Cheetah", options: ["Lion","Cheetah","Horse","Leopard"] },
-  { q: "What is the hardest natural substance on Earth?", a: "Diamond", options: ["Gold","Iron","Diamond","Quartz"] },
-  { q: "What year did World War II end?", a: "1945", options: ["1943","1944","1945","1946"] },
-  { q: "What is the chemical symbol for water?", a: "H2O", options: ["O2","CO2","H2O","H2SO4"] },
-  { q: "How many bones are in the adult human body?", a: "206", options: ["196","206","216","226"] },
-  { q: "What is the smallest planet in our solar system?", a: "Mercury", options: ["Mars","Pluto","Mercury","Venus"] },
-  { q: "Who wrote Romeo and Juliet?", a: "Shakespeare", options: ["Dickens","Shakespeare","Tolkien","Hemingway"] },
-  { q: "What is the speed of light (approx)?", a: "300,000 km/s", options: ["150,000 km/s","300,000 km/s","500,000 km/s","1,000,000 km/s"] },
-  { q: "What language has the most native speakers?", a: "Mandarin Chinese", options: ["English","Spanish","Mandarin Chinese","Hindi"] },
-  { q: "What is the tallest mountain in the world?", a: "Mount Everest", options: ["K2","Mount Everest","Kangchenjunga","Lhotse"] },
-  { q: "How many players are on a standard soccer team?", a: "11", options: ["9","10","11","12"] },
-  { q: "What element does 'O' represent on the periodic table?", a: "Oxygen", options: ["Gold","Osmium","Oxygen","Oganesson"] },
-  { q: "What is 7 × 8?", a: "56", options: ["48","54","56","64"] },
-];
-
-const WYR = [
-  "Would you rather **fly** or be **invisible**?",
-  "Would you rather have **unlimited money** or **unlimited time**?",
-  "Would you rather **never sleep** or **never eat**?",
-  "Would you rather be **always hot** or **always cold**?",
-  "Would you rather **speak every language** or **play every instrument**?",
-  "Would you rather **live in space** or **under the ocean**?",
-  "Would you rather **know when you'll die** or **how you'll die**?",
-  "Would you rather **be a famous actor** or **a famous musician**?",
-  "Would you rather **always be late** or **always be 2 hours early**?",
-  "Would you rather **have no internet** or **no music**?",
-  "Would you rather **fight 100 duck-sized horses** or **1 horse-sized duck**?",
-  "Would you rather **lose all your money** or **lose all your memories**?",
-  "Would you rather **only whisper** or **only shout**?",
-  "Would you rather **be famous but broke** or **rich but unknown**?",
-  "Would you rather **teleport** or **time travel**?",
-];
-
-const RIDDLES = [
-  { q: "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?", a: "an echo" },
-  { q: "The more you take, the more you leave behind. What am I?", a: "footsteps" },
-  { q: "I have cities, but no houses live there. I have mountains, but no trees grow. I have water, but no fish swim. I have roads, but no cars drive. What am I?", a: "a map" },
-  { q: "What has hands but can't clap?", a: "a clock" },
-  { q: "What gets wetter the more it dries?", a: "a towel" },
-  { q: "I have a head and a tail, but no body. What am I?", a: "a coin" },
-  { q: "What has to be broken before you can use it?", a: "an egg" },
-  { q: "I'm tall when I'm young, short when I'm old. What am I?", a: "a candle" },
-  { q: "What has many teeth but can't bite?", a: "a comb" },
-  { q: "What can travel around the world while staying in a corner?", a: "a stamp" },
-];
 
 function parseDuration(s) {
   const m = s.trim().match(/^(\d+)\s*(s|m|h|d)/i);
@@ -565,138 +541,148 @@ client.on("messageCreate", async message => {
         break;
       }
 
-      // ── Fun ───────────────────────────────────────────────────────────────
-      case "8ball": {
-        const question = args.join(" ");
-        if (!question) return void message.reply("Usage: `!8ball <question>`");
-        const answer = EIGHT_BALL[Math.floor(Math.random() * EIGHT_BALL.length)];
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🎱 Magic 8-Ball").setDescription(`**Question:** ${question}\n**Answer:** ${answer}`).setColor(0x2c2f33)] });
-        break;
-      }
-      case "roll": {
-        const sides = Math.max(2, Number(args[0]) || 6);
-        const count = Math.min(Math.max(1, Number(args[1]) || 1), 10);
-        const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
-        await message.reply(count === 1 ? `🎲 Rolled a **${rolls[0]}** (d${sides})` : `🎲 Rolled: ${rolls.join(", ")} (d${sides})`);
-        break;
-      }
-      case "coinflip":
-        await message.reply(`🪙 **${Math.random() < 0.5 ? "Heads" : "Tails"}**!`);
-        break;
-
-      // ── Games ─────────────────────────────────────────────────────────────
-      case "rps": {
-        const choices = ["rock","paper","scissors"];
-        const emojis = { rock: "🪨", paper: "📄", scissors: "✂️" };
-        const userChoice = args[0]?.toLowerCase();
-        if (!choices.includes(userChoice)) return void message.reply("Usage: `!rps <rock|paper|scissors>`");
-        const botChoice = choices[Math.floor(Math.random() * 3)];
-        let result;
-        if (userChoice === botChoice) result = "🤝 It's a **tie**!";
-        else if ((userChoice==="rock"&&botChoice==="scissors")||(userChoice==="paper"&&botChoice==="rock")||(userChoice==="scissors"&&botChoice==="paper"))
-          result = "🎉 You **win**!";
-        else result = "😢 You **lose**!";
+      // ── 662 Casino ───────────────────────────────────────────────────────
+      case "balance": case "bal": {
+        const user = targetUser || message.author;
+        const acc = economy.get(message.guild.id, user.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("✊ Rock Paper Scissors")
-          .setDescription(`You: ${emojis[userChoice]} **${userChoice}**\nBot: ${emojis[botChoice]} **${botChoice}**\n\n${result}`)
-          .setColor(result.includes("win") ? 0x57f287 : result.includes("lose") ? 0xed4245 : 0xffd700)] });
+          .setTitle(`💳 ${user.username}'s Wallet`)
+          .setDescription(fmtMoney(acc.balance))
+          .setColor(0xe91e8c)] });
+        break;
+      }
+      case "daily": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const cooldown = 86400000;
+        const remaining = acc.lastDaily + cooldown - Date.now();
+        if (remaining > 0) return void message.reply(`⏳ You already claimed your daily. Come back in **${formatUptime(remaining)}**.`);
+        const amount = 100 + Math.floor(Math.random() * 201); // 100-300
+        const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastDaily: Date.now() });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("📅 Daily Claimed!").setDescription(`You got **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
+        break;
+      }
+      case "work": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const cooldown = 3600000;
+        const remaining = acc.lastWork + cooldown - Date.now();
+        if (remaining > 0) return void message.reply(`⏳ You're tired. Rest for **${formatUptime(remaining)}** before working again.`);
+        const jobs = ["ran a package for a plug","flipped some sneakers","hustled a car wash","did a food delivery run","fixed someone's PC","sold merch outside the venue"];
+        const job = jobs[Math.floor(Math.random() * jobs.length)];
+        const amount = 50 + Math.floor(Math.random() * 101); // 50-150
+        const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastWork: Date.now() });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("💼 Work Complete").setDescription(`You ${job} and earned **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
+        break;
+      }
+      case "give": case "pay": {
+        const user = targetUser;
+        const amount = Math.floor(Number(args.find(a => /^\d+$/.test(a)) || 0));
+        if (!user || user.id === message.author.id) return void message.reply("Usage: `!give <@user> <amount>`");
+        if (user.bot) return void message.reply("You can't give chips to a bot.");
+        if (!amount || amount < 1) return void message.reply("Enter a valid amount to give.");
+        const acc = economy.get(message.guild.id, message.author.id);
+        if (acc.balance < amount) return void message.reply(`You don't have enough. Balance: ${fmtMoney(acc.balance)}`);
+        economy.add(message.guild.id, message.author.id, -amount);
+        economy.add(message.guild.id, user.id, amount);
+        await message.reply(`✅ Sent **${fmtMoney(amount)}** to ${user}.`);
+        break;
+      }
+      case "steal": {
+        const user = targetUser;
+        if (!user || user.id === message.author.id) return void message.reply("Usage: `!steal <@user>`");
+        if (user.bot) return void message.reply("You can't steal from a bot.");
+        const thief = economy.get(message.guild.id, message.author.id);
+        const cooldown = 1800000; // 30 min
+        const remaining = thief.lastSteal + cooldown - Date.now();
+        if (remaining > 0) return void message.reply(`⏳ Lay low for **${formatUptime(remaining)}** before your next heist.`);
+        const victim = economy.get(message.guild.id, user.id);
+        economy.set(message.guild.id, message.author.id, { lastSteal: Date.now() });
+        if (victim.balance < 50) return void message.reply(`${user.username} is broke — nothing worth stealing.`);
+        const success = Math.random() < 0.4; // 40% success
+        if (success) {
+          const amount = Math.floor(victim.balance * (0.1 + Math.random() * 0.25)); // 10-35%
+          economy.add(message.guild.id, user.id, -amount);
+          economy.add(message.guild.id, message.author.id, amount);
+          await message.reply({ embeds: [new EmbedBuilder()
+            .setTitle("🕶️ Heist Successful!")
+            .setDescription(`You stole **${fmtMoney(amount)}** from ${user}!`)
+            .setColor(0x57f287)], allowedMentions: { parse: [] } });
+        } else {
+          const fine = Math.floor(50 + Math.random() * 150);
+          economy.add(message.guild.id, message.author.id, -fine);
+          await message.reply({ embeds: [new EmbedBuilder()
+            .setTitle("🚨 Caught!")
+            .setDescription(`You got caught trying to rob ${user} and paid a **${fmtMoney(fine)}** fine.`)
+            .setColor(0xed4245)], allowedMentions: { parse: [] } });
+        }
+        break;
+      }
+      case "coinflip": case "cf": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const bet = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
+        const side = (args[1] || "").toLowerCase();
+        if (!bet || bet < 1 || !["heads","tails"].includes(side)) return void message.reply("Usage: `!coinflip <amount|all> <heads|tails>`");
+        if (bet > acc.balance) return void message.reply(`You don't have that much. Balance: ${fmtMoney(acc.balance)}`);
+        const result = Math.random() < 0.5 ? "heads" : "tails";
+        const win = result === side;
+        economy.add(message.guild.id, message.author.id, win ? bet : -bet);
+        const updated = economy.get(message.guild.id, message.author.id);
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🪙 Coinflip")
+          .setDescription(`It landed on **${result}**!\n${win ? `You won **${fmtMoney(bet)}**! 🎉` : `You lost **${fmtMoney(bet)}**. 😢`}\nBalance: ${fmtMoney(updated.balance)}`)
+          .setColor(win ? 0x57f287 : 0xed4245)] });
         break;
       }
       case "slots": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const bet = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
+        if (!bet || bet < 1) return void message.reply("Usage: `!slots <amount|all>`");
+        if (bet > acc.balance) return void message.reply(`You don't have that much. Balance: ${fmtMoney(acc.balance)}`);
         const symbols = ["🍒","🍋","🍊","🍇","⭐","💎","7️⃣"];
         const s = () => symbols[Math.floor(Math.random() * symbols.length)];
         const [a, b, c] = [s(), s(), s()];
-        const win = a === b && b === c;
-        const twoMatch = a === b || b === c || a === c;
-        const resultText = win ? "🎉 **JACKPOT! Three of a kind!**" : twoMatch ? "✨ **Two of a kind! Almost!**" : "❌ **No match. Try again!**";
+        const jackpot = a === b && b === c && a === "7️⃣";
+        const win3 = a === b && b === c;
+        const win2 = a === b || b === c || a === c;
+        let multiplier = 0, resultText;
+        if (jackpot) { multiplier = 10; resultText = "🎉 **JACKPOT!!! 10x payout!**"; }
+        else if (win3) { multiplier = 4; resultText = "🎊 **Three of a kind! 4x payout!**"; }
+        else if (win2) { multiplier = 1.5; resultText = "✨ **Two of a kind! 1.5x payout!**"; }
+        else { multiplier = -1; resultText = "❌ **No match. You lose your bet.**"; }
+        const delta = Math.floor(bet * multiplier);
+        economy.add(message.guild.id, message.author.id, delta);
+        const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🎰 Slots")
-          .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}`)
-          .setColor(win ? 0xffd700 : twoMatch ? 0x57f287 : 0x99aab5)] });
+          .setTitle("🎰 662 Slots")
+          .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}\n${delta >= 0 ? `Won **${fmtMoney(delta)}**` : `Lost **${fmtMoney(-delta)}**`}\nBalance: ${fmtMoney(updated.balance)}`)
+          .setColor(jackpot ? 0xffd700 : win3 ? 0x57f287 : win2 ? 0x99aab5 : 0xed4245)] });
         break;
       }
-      case "trivia": {
-        const q = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
-        const shuffled = [...q.options].sort(() => Math.random() - 0.5);
-        const letters = ["A","B","C","D"];
-        const choiceMap = Object.fromEntries(shuffled.map((opt, i) => [letters[i], opt]));
-        const correctLetter = Object.keys(choiceMap).find(k => choiceMap[k] === q.a);
-        const optionsText = Object.entries(choiceMap).map(([l, v]) => `**${l})** ${v}`).join("\n");
+      case "dice": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const bet = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
+        if (!bet || bet < 1) return void message.reply("Usage: `!dice <amount|all>` — roll higher than the house to win");
+        if (bet > acc.balance) return void message.reply(`You don't have that much. Balance: ${fmtMoney(acc.balance)}`);
+        const you = Math.floor(Math.random() * 6) + 1;
+        const house = Math.floor(Math.random() * 6) + 1;
+        const win = you > house;
+        const tie = you === house;
+        const delta = tie ? 0 : win ? bet : -bet;
+        economy.add(message.guild.id, message.author.id, delta);
+        const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🧠 Trivia")
-          .setDescription(`${q.q}\n\n${optionsText}\n\n*Type A, B, C, or D — you have 15 seconds!*`)
-          .setColor(0x5865f2)] });
-        const filter = m => m.author.id === message.author.id && ["a","b","c","d"].includes(m.content.toLowerCase());
-        const collector = message.channel.createMessageCollector({ filter, time: 15000, max: 1 });
-        collector.on("collect", async m => {
-          const answered = m.content.toUpperCase();
-          if (answered === correctLetter)
-            await message.channel.send(`✅ **Correct!** The answer was **${q.a}**. Well done, ${message.author}!`);
-          else
-            await message.channel.send(`❌ **Wrong!** The correct answer was **${correctLetter}) ${q.a}**. Better luck next time, ${message.author}!`);
-        });
-        collector.on("end", collected => {
-          if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${correctLetter}) ${q.a}**.`).catch(()=>{});
-        });
+          .setTitle("🎲 Dice Duel")
+          .setDescription(`You rolled **${you}**, house rolled **${house}**.\n${tie ? "🤝 Tie — bet refunded." : win ? `🎉 You won **${fmtMoney(bet)}**!` : `😢 You lost **${fmtMoney(bet)}**.`}\nBalance: ${fmtMoney(updated.balance)}`)
+          .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
         break;
       }
-      case "wyr": {
-        const prompt = WYR[Math.floor(Math.random() * WYR.length)];
-        await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🤔 Would You Rather...")
-          .setDescription(prompt)
-          .setColor(0xf5a623)
-          .setFooter({ text: "Reply in chat with your choice!" })] });
-        break;
-      }
-      case "riddle": {
-        const riddle = RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
-        await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🧩 Riddle")
-          .setDescription(`${riddle.q}\n\n*Type your answer — you have 30 seconds!*`)
-          .setColor(0x9b59b6)] });
-        const filter = m => m.author.id === message.author.id;
-        const collector = message.channel.createMessageCollector({ filter, time: 30000, max: 1 });
-        collector.on("collect", async m => {
-          if (m.content.toLowerCase().includes(riddle.a.toLowerCase()))
-            await message.channel.send(`✅ **Correct!** The answer was **${riddle.a}**. Great job, ${message.author}!`);
-          else
-            await message.channel.send(`❌ **Not quite!** The answer was **${riddle.a}**. Good try, ${message.author}!`);
-        });
-        collector.on("end", collected => {
-          if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${riddle.a}**.`).catch(()=>{});
-        });
-        break;
-      }
-      case "numguess": {
-        if (activeGames.has(message.author.id)) return void message.reply("You already have an active guessing game!");
-        const target = Math.floor(Math.random() * 100) + 1;
-        let attempts = 0;
-        activeGames.set(message.author.id, true);
-        await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🔢 Number Guessing Game")
-          .setDescription("I'm thinking of a number between **1 and 100**.\nYou have **7 attempts** — type your guesses!")
-          .setColor(0x5865f2)] });
-        const filter = m => m.author.id === message.author.id && !isNaN(m.content) && m.content.trim() !== "";
-        const collector = message.channel.createMessageCollector({ filter, time: 60000, max: 7 });
-        collector.on("collect", async m => {
-          attempts++;
-          const guess = Number(m.content.trim());
-          const remaining = 7 - attempts;
-          if (guess === target) {
-            collector.stop("win");
-            activeGames.delete(message.author.id);
-            await m.reply(`🎉 **Correct!** The number was **${target}**! You got it in **${attempts}** attempt(s)!`);
-          } else if (remaining === 0) {
-            collector.stop("lose");
-          } else {
-            await m.reply(`${guess < target ? "📈 Too low!" : "📉 Too high!"} **${remaining}** attempt(s) left.`);
-          }
-        });
-        collector.on("end", (_, reason) => {
-          activeGames.delete(message.author.id);
-          if (reason !== "win") message.channel.send(`💀 Game over! The number was **${target}**. Better luck next time!`).catch(()=>{});
-        });
+      case "leaderboard": case "lb": {
+        const top = economy.top(message.guild.id, 10);
+        if (!top.length) return void message.reply("Nobody has any chips yet.");
+        const lines = await Promise.all(top.map(async (e, i) => {
+          const u = await client.users.fetch(e.userId).catch(() => null);
+          return `**${i + 1}.** ${u ? u.username : "Unknown User"} — ${fmtMoney(e.balance)}`;
+        }));
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 662 Casino Leaderboard").setDescription(lines.join("\n")).setColor(0xffd700)] });
         break;
       }
 
@@ -1019,17 +1005,17 @@ client.on("messageCreate", async message => {
               ].join("\n"),
             },
             {
-              name: "🎮 Games",
+              name: "🎰 662 Casino",
               value: [
-                "`!rps <rock|paper|scissors>` — Rock Paper Scissors vs bot",
-                "`!coinflip` — Flip a coin",
-                "`!roll [sides] [count]` — Roll dice (default: 1d6)",
-                "`!slots` — Spin the slot machine",
-                "`!trivia` — Answer a random trivia question",
-                "`!wyr` — Would You Rather prompt",
-                "`!riddle` — Solve a riddle",
-                "`!numguess` — Guess a number 1-100 (7 attempts)",
-                "`!8ball <question>` — Ask the magic 8-ball",
+                "`!balance [@user]` — Check your (or someone's) chip balance",
+                "`!daily` — Claim your daily chips (every 24h)",
+                "`!work` — Earn chips (every 1h)",
+                "`!give <@user> <amount>` — Send chips to someone",
+                "`!steal <@user>` — Attempt to rob someone's chips (40% success, 30min cooldown)",
+                "`!coinflip <amount|all> <heads|tails>` — Bet on a coin flip",
+                "`!slots <amount|all>` — Spin the slots",
+                "`!dice <amount|all>` — Roll against the house",
+                "`!leaderboard` — Top chip holders in the server",
               ].join("\n"),
             },
             {
