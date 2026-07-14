@@ -742,11 +742,12 @@ client.on("messageCreate", async message => {
         if (rest.includes("|")) {
           [userPart, rolePart] = rest.split("|").map(s => s.trim());
         } else {
-          // No "|" given — only works if a role mention is present to mark the split point.
-          const roleMentionMatch = rest.match(/<@&\d+>/);
-          if (!roleMentionMatch) return void message.reply(`Please separate the user and role with \`|\`.\n\n${usage}`);
-          rolePart = roleMentionMatch[0];
-          userPart = rest.slice(0, roleMentionMatch.index).trim();
+          // No "|" given — mark the split point with a role mention or a bare role ID
+          // (either way, no pinging is required for the user side).
+          const roleAnchorMatch = rest.match(/<@&\d+>/) || rest.match(/\b\d{17,19}\b/);
+          if (!roleAnchorMatch) return void message.reply(`Please separate the user and role with \`|\`.\n\n${usage}`);
+          rolePart = roleAnchorMatch[0];
+          userPart = rest.slice(0, roleAnchorMatch.index).trim();
         }
         if (!userPart || !rolePart) return void message.reply(usage);
 
