@@ -270,7 +270,12 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once("clientReady", c => { console.log(`✅ Logged in as ${c.user.tag}`); resumeGiveaways(client); resumeReminders(client); });
+client.once("clientReady", c => {
+  console.log(`✅ Logged in as ${c.user.tag}`);
+  c.user.setPresence({ status: "dnd" });
+  resumeGiveaways(client);
+  resumeReminders(client);
+});
 
 // ─── Welcome ───────────────────────────────────────────────────────────────
 client.on("guildMemberAdd", async member => {
