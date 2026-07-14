@@ -317,7 +317,11 @@ client.on("messageDelete", message => {
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
   if (afkUsers.has(message.author.id) && !message.content.startsWith(PREFIX)) {
+    const { nick } = afkUsers.get(message.author.id);
     afkUsers.delete(message.author.id);
+    if (message.member?.nickname?.startsWith("[AFK] ")) {
+      await message.member.setNickname(nick || null).catch(() => {});
+    }
     const m = await message.reply(`👋 Welcome back, **${message.author.username}**! Your AFK has been removed.`).catch(()=>null);
     if (m) setTimeout(() => m.delete().catch(()=>{}), 5000);
   }
@@ -542,7 +546,12 @@ client.on("messageCreate", async message => {
       }
       case "afk": {
         const reason = args.join(" ") || "AFK";
-        afkUsers.set(message.author.id, { reason, since: Date.now() });
+        const originalNick = message.member.nickname; // null = no nickname set, just uses username
+        afkUsers.set(message.author.id, { reason, since: Date.now(), nick: originalNick });
+        const baseName = originalNick || message.member.displayName;
+        if (!baseName.startsWith("[AFK] ")) {
+          await message.member.setNickname(`[AFK] ${baseName}`.slice(0, 32)).catch(() => {});
+        }
         await message.reply(`💤 You're now AFK: **${reason}**`);
         break;
       }
