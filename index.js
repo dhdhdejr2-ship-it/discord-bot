@@ -221,6 +221,13 @@ async function endGiveaway(client, messageId) {
   } catch (e) { console.error("Giveaway end error:", e); }
 }
 function scheduleGiveaway(client, messageId, ms) { setTimeout(() => endGiveaway(client, messageId), ms); }
+
+// ─── Welcome banner image ──────────────────────────────────────────────────
+const WELCOME_IMAGE_PATH = path.join(__dirname, "assets", "welcome.png");
+function welcomeImageAttachment() {
+  if (!fs.existsSync(WELCOME_IMAGE_PATH)) return null;
+  return new AttachmentBuilder(WELCOME_IMAGE_PATH, { name: "welcome.png" });
+}
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
     if (g.ended) continue;
@@ -253,7 +260,10 @@ client.on("guildMemberAdd", async member => {
       .replace(/{server}/g, member.guild.name)
       .replace(/{count}/g, member.guild.memberCount)
       .replace(/{membercount}/g, member.guild.memberCount);
-    await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL())] });
+    const attachment = welcomeImageAttachment();
+    const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
+    if (attachment) embed.setImage("attachment://welcome.png");
+    await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Welcome error:", e); }
 });
 
@@ -715,7 +725,10 @@ client.on("messageCreate", async message => {
         if (!chId) return void message.reply("No welcome channel set. Use `!setwelcome #channel` first.");
         const msg = cfg.welcomeMsg || `Welcome to **${message.guild.name}**, ${message.author}! You are member #${message.guild.memberCount}.`;
         const ch = await client.channels.fetch(chId);
-        await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" })] });
+        const previewAttachment = welcomeImageAttachment();
+        const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
+        if (previewAttachment) previewEmbed.setImage("attachment://welcome.png");
+        await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
         await message.reply("✅ Preview sent!");
         break;
       }
