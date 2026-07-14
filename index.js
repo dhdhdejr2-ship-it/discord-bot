@@ -139,6 +139,41 @@ function requirePerm(msg, perm) {
   return true;
 }
 
+// Resolve a guild member from a mention, raw ID, or username/nickname search —
+// lets staff target someone by name so the command doesn't ping them.
+async function resolveMember(guild, query) {
+  if (!query) return null;
+  const mentionMatch = query.match(/^<@!?(\d+)>$/);
+  const id = mentionMatch ? mentionMatch[1] : (/^\d{17,19}$/.test(query) ? query : null);
+  if (id) return guild.members.fetch(id).catch(() => null);
+
+  await guild.members.fetch().catch(() => {});
+  const q = query.toLowerCase().replace(/^@/, "");
+  return (
+    guild.members.cache.find(
+      m => m.user.username.toLowerCase() === q || m.user.tag.toLowerCase() === q || m.displayName.toLowerCase() === q
+    ) ||
+    guild.members.cache.find(
+      m => m.user.username.toLowerCase().includes(q) || m.displayName.toLowerCase().includes(q)
+    ) ||
+    null
+  );
+}
+
+// Resolve a role from a mention, raw ID, or name search.
+function resolveRole(guild, query) {
+  if (!query) return null;
+  const mentionMatch = query.match(/^<@&(\d+)>$/);
+  if (mentionMatch) return guild.roles.cache.get(mentionMatch[1]) || null;
+  if (/^\d{17,19}$/.test(query)) return guild.roles.cache.get(query) || null;
+  const q = query.toLowerCase();
+  return (
+    guild.roles.cache.find(r => r.name.toLowerCase() === q) ||
+    guild.roles.cache.find(r => r.name.toLowerCase().includes(q)) ||
+    null
+  );
+}
+
 function formatUptime(ms) {
   const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24);
   return `${d}d ${h%24}h ${m%60}m ${s%60}s`;
@@ -630,20 +665,49 @@ client.on("messageCreate", async message => {
       }
       case "role": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        if (!targetMember) return void message.reply("Usage: `!role @user <role name>`");
-        // Support role mention OR role name search
-        const role = message.mentions.roles.first() || (() => {
-          const nameQuery = args.slice(1).join(" ").replace(/<@&\d+>/g, "").trim().toLowerCase();
-          return nameQuery ? message.guild.roles.cache.find(r => r.name.toLowerCase() === nameQuery || r.name.toLowerCase().startsWith(nameQuery)) : null;
-        })();
-        if (!role) return void message.reply("Role not found. Usage: `!role @user <role name>` or `!role @user @role`");
-        const hasRole = targetMember.roles.cache.has(role.id);
-        if (hasRole) {
-          await targetMember.roles.remove(role);
-          await message.reply(`✅ Removed **${role.name}** from **${targetUser.tag}**`);
+
+        const raw = message.content.slice(PREFIX.length + "role".length).trim();
+        let sub = null;
+        let rest = raw;
+        const subMatch = raw.match(/^(add|remove)\s+/i);
+        if (subMatch) {
+          sub = subMatch[1].toLowerCase();
+          rest = raw.slice(subMatch[0].length).trim();
+        }
+
+        const usage = "Usage: `!role [add|remove] <user> | <role>`\nExamples:\n`!role add Sam | Moderator` — add by name, no ping\n`!role remove @Sam | Moderator`\n`!role @Sam | Moderator` — toggle (adds if missing, removes if present)";
+        if (!rest) return void message.reply(usage);
+
+        let userPart, rolePart;
+        if (rest.includes("|")) {
+          [userPart, rolePart] = rest.split("|").map(s => s.trim());
         } else {
-          await targetMember.roles.add(role);
-          await message.reply(`✅ Added **${role.name}** to **${targetUser.tag}**`);
+          // No "|" given — only works if a role mention is present to mark the split point.
+          const roleMentionMatch = rest.match(/<@&\d+>/);
+          if (!roleMentionMatch) return void message.reply(`Please separate the user and role with \`|\`.\n\n${usage}`);
+          rolePart = roleMentionMatch[0];
+          userPart = rest.slice(0, roleMentionMatch.index).trim();
+        }
+        if (!userPart || !rolePart) return void message.reply(usage);
+
+        const member = await resolveMember(message.guild, userPart);
+        if (!member) return void message.reply(`Couldn't find a member matching \`${userPart}\`.`);
+
+        const role = resolveRole(message.guild, rolePart);
+        if (!role) return void message.reply(`Couldn't find a role matching \`${rolePart}\`.`);
+        if (!role.editable) return void message.reply(`I can't manage **${role.name}** — it's above my highest role, or I'm missing the **Manage Roles** permission.`);
+
+        const hasRole = member.roles.cache.has(role.id);
+        const action = sub || (hasRole ? "remove" : "add");
+
+        if (action === "add") {
+          if (hasRole) return void message.reply({ content: `**${member.user.tag}** already has **${role.name}**.`, allowedMentions: { parse: [] } });
+          await member.roles.add(role);
+          await message.reply({ content: `✅ Added **${role.name}** to **${member.user.tag}**`, allowedMentions: { parse: [] } });
+        } else {
+          if (!hasRole) return void message.reply({ content: `**${member.user.tag}** doesn't have **${role.name}**.`, allowedMentions: { parse: [] } });
+          await member.roles.remove(role);
+          await message.reply({ content: `✅ Removed **${role.name}** from **${member.user.tag}**`, allowedMentions: { parse: [] } });
         }
         break;
       }
@@ -741,6 +805,7 @@ client.on("messageCreate", async message => {
       case "kick": {
         if (!requirePerm(message, PermissionFlagsBits.KickMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!kick @user [reason]`");
+        if (!targetMember.kickable) return void message.reply("I can't kick that member — they may have a role equal to or higher than mine, or I'm missing the **Kick Members** permission.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await targetMember.kick(reason);
         await message.reply(`👢 Kicked **${targetUser.tag}** — ${reason}`);
@@ -750,6 +815,7 @@ client.on("messageCreate", async message => {
       case "ban": {
         if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
         if (!targetUser) return void message.reply("Usage: `!ban @user [reason]`");
+        if (targetMember && !targetMember.bannable) return void message.reply("I can't ban that member — they may have a role equal to or higher than mine, or I'm missing the **Ban Members** permission.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await message.guild.members.ban(targetUser.id, { reason });
         await message.reply(`🔨 Banned **${targetUser.tag}** — ${reason}`);
@@ -768,6 +834,8 @@ client.on("messageCreate", async message => {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         const mins = Number(args[1]);
         if (!targetMember || isNaN(mins) || mins < 1) return void message.reply("Usage: `!to @user <minutes> [reason]`");
+        if (mins > 40320) return void message.reply("Timeout duration can't exceed 28 days (40320 minutes).");
+        if (!targetMember.moderatable) return void message.reply("I can't timeout that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
         const reason = args.slice(2).join(" ") || "No reason provided";
         await targetMember.timeout(mins * 60000, reason);
         await message.reply(`⏱️ Timed out **${targetUser.tag}** for **${mins}m** — ${reason}`);
@@ -777,6 +845,7 @@ client.on("messageCreate", async message => {
       case "untimeout": case "rto": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!rto @user`");
+        if (!targetMember.moderatable) return void message.reply("I can't manage that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
         await targetMember.timeout(null);
         await message.reply(`✅ Removed timeout from **${targetUser.tag}**`);
         break;
@@ -909,7 +978,7 @@ client.on("messageCreate", async message => {
               value: [
                 "`!say [#channel] <message>` — Make the bot say something",
                 "`!announce #channel <title> | <message>` — Post an announcement",
-                "`!role @user <role name>` — Toggle a role (adds if missing, removes if present)",
+                "`!role [add|remove] <user> | <role>` — Manage a role by name or mention (no ping needed), e.g. `!role add Sam | Moderator`",
                 "`!setwelcome #channel <message>` — Set welcome message",
                 "`!testwelcome` — Preview the welcome message",
                 "`!ticketsetup <category-id> [@staff-role]` — Configure ticket system",
