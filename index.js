@@ -272,6 +272,13 @@ function welcomeImageAttachment() {
   if (!fs.existsSync(WELCOME_IMAGE_PATH)) return null;
   return new AttachmentBuilder(WELCOME_IMAGE_PATH, { name: "welcome.png" });
 }
+
+// ─── Giveaway banner image ─────────────────────────────────────────────────
+const GIVEAWAY_IMAGE_PATH = path.join(__dirname, "assets", "giveaway.png");
+function giveawayImageAttachment() {
+  if (!fs.existsSync(GIVEAWAY_IMAGE_PATH)) return null;
+  return new AttachmentBuilder(GIVEAWAY_IMAGE_PATH, { name: "giveaway.png" });
+}
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
     if (g.ended) continue;
@@ -973,7 +980,9 @@ client.on("messageCreate", async message => {
           .setColor(0xffd700)
           .setFooter({ text: `Hosted by ${message.author.tag}` })
           .setTimestamp(Date.now() + ms);
-        const gMsg = await message.channel.send({ embeds: [embed], components: [row] });
+        const giveawayAttachment = giveawayImageAttachment();
+        if (giveawayAttachment) embed.setImage("attachment://giveaway.png");
+        const gMsg = await message.channel.send({ embeds: [embed], components: [row], files: giveawayAttachment ? [giveawayAttachment] : [] });
         giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
         scheduleGiveaway(client, gMsg.id, ms);
         await message.reply("✅ Giveaway started!");
