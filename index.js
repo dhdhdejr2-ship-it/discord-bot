@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, AttachmentBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
@@ -15,7 +15,7 @@ function saveJSON(file, data) {
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
-// Guild config: { guildId: { welcomeChannel, welcomeMsg, modlogChannel } }
+// Guild config: { guildId: { welcomeChannel, welcomeMsg, modlogChannel, ticketCategory, ticketRole } }
 function getConfig(guildId) {
   const cfg = loadJSON("config.json", {});
   return cfg[guildId] || {};
@@ -49,16 +49,25 @@ const giveaways = {
 };
 
 const PREFIX = "!";
-const GIVEAWAY_BTN = "giveaway_enter";
+const GIVEAWAY_BTN   = "giveaway_enter";
+const TICKET_SELECT  = "ticket_category";
+const TICKET_CLOSE   = "ticket_close";
+
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 const EIGHT_BALL = ["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Yes.","Signs point to yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
+
+const TICKET_CATEGORIES = {
+  access:  { label: "🔐 Access",  description: "Request access to something",  color: 0xe91e8c },
+  allies:  { label: "🤝 Allies",  description: "Alliance & partnership requests", color: 0xe91e8c },
+  buying:  { label: "🛒 Buying",  description: "Purchasing & buying inquiries", color: 0xe91e8c },
+};
 
 const startTime = Date.now();
 
 // ─── In-memory state ───────────────────────────────────────────────────────
-const sniped = new Map();      // channelId → { author, content, timestamp }
-const afkUsers = new Map();    // userId → { reason, since }
-const activeGames = new Map(); // userId → true (numguess lock)
+const sniped     = new Map(); // channelId → { author, content, timestamp }
+const afkUsers   = new Map(); // userId    → { reason, since }
+const activeGames = new Map(); // userId   → true
 
 // ─── Game data ─────────────────────────────────────────────────────────────
 const TRIVIA = [
@@ -144,14 +153,11 @@ async function logToModlog(guild, embed) {
   } catch {}
 }
 
-// Safe math evaluator (no eval)
 function safeMath(expr) {
   const cleaned = expr.replace(/\s+/g, "");
   if (!/^[\d+\-*/().%^]+$/.test(cleaned)) return null;
   try {
-    // Replace ^ with ** for exponentiation
     const safe = cleaned.replace(/\^/g, "**");
-    // Use Function constructor in a restricted way
     const result = Function('"use strict"; return (' + safe + ')')();
     if (typeof result !== "number" || !isFinite(result)) return null;
     return Math.round(result * 1e10) / 1e10;
@@ -232,13 +238,11 @@ client.on("messageDelete", message => {
 // ─── AFK: detect when AFK user speaks ─────────────────────────────────────
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
-  // If AFK user sends a message, clear their AFK
-  if (afkUsers.has(message.author.id)) {
+  if (afkUsers.has(message.author.id) && !message.content.startsWith(PREFIX)) {
     afkUsers.delete(message.author.id);
     const m = await message.reply(`👋 Welcome back, **${message.author.username}**! Your AFK has been removed.`).catch(()=>null);
     if (m) setTimeout(() => m.delete().catch(()=>{}), 5000);
   }
-  // If someone mentions an AFK user, notify
   for (const user of message.mentions.users.values()) {
     if (afkUsers.has(user.id)) {
       const { reason, since } = afkUsers.get(user.id);
@@ -247,17 +251,74 @@ client.on("messageCreate", async message => {
   }
 });
 
-// ─── Buttons ───────────────────────────────────────────────────────────────
+// ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isButton()) return;
-  const { customId, user } = interaction;
-
-  if (customId === GIVEAWAY_BTN) {
+  // ── Giveaway button ──
+  if (interaction.isButton() && interaction.customId === GIVEAWAY_BTN) {
     const g = giveaways.get(interaction.message.id);
     if (!g || g.ended) return interaction.reply({ content: "This giveaway has ended.", ephemeral: true });
-    if (g.participants.includes(user.id)) return interaction.reply({ content: "You're already entered!", ephemeral: true });
-    giveaways.update(g.messageId, { participants: [...g.participants, user.id] });
+    if (g.participants.includes(interaction.user.id)) return interaction.reply({ content: "You're already entered!", ephemeral: true });
+    giveaways.update(g.messageId, { participants: [...g.participants, interaction.user.id] });
     return interaction.reply({ content: "🎉 You're entered in the giveaway!", ephemeral: true });
+  }
+
+  // ── Ticket close button ──
+  if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
+    const canClose =
+      interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels) ||
+      interaction.channel.name.includes(interaction.user.username.toLowerCase());
+    if (!canClose) return interaction.reply({ content: "You can't close this ticket.", ephemeral: true });
+    await interaction.reply("🔒 Closing ticket in 5 seconds...");
+    setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
+    return;
+  }
+
+  // ── Ticket category select menu ──
+  if (interaction.isStringSelectMenu() && interaction.customId === TICKET_SELECT) {
+    const category = interaction.values[0]; // "access" | "allies" | "buying"
+    const cat = TICKET_CATEGORIES[category];
+    const { user, guild } = interaction;
+    if (!guild) return;
+
+    // Check for existing ticket
+    const existing = guild.channels.cache.find(
+      c => c.name === `${category}-${user.username.toLowerCase()}`
+    );
+    if (existing) {
+      return interaction.reply({ content: `You already have an open ticket: ${existing}`, ephemeral: true });
+    }
+
+    const cfg = getConfig(guild.id);
+    try {
+      const ch = await guild.channels.create({
+        name: `${category}-${user.username.toLowerCase()}`,
+        parent: cfg.ticketCategory || process.env.TICKET_CATEGORY_ID || undefined,
+        permissionOverwrites: [
+          { id: guild.roles.everyone, deny: ["ViewChannel"] },
+          { id: user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
+          ...(cfg.ticketRole ? [{ id: cfg.ticketRole, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
+          { id: client.user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory","ManageChannels"] },
+        ],
+      });
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(TICKET_CLOSE).setLabel("🔒 Close Ticket").setStyle(ButtonStyle.Danger)
+      );
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${cat.label} Ticket`)
+        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nDescribe your issue or request below.`)
+        .setColor(cat.color)
+        .setFooter({ text: "662 Support • Click Close Ticket when done" })
+        .setTimestamp();
+
+      await ch.send({ content: `${user}`, embeds: [embed], components: [closeRow] });
+      await interaction.reply({ content: `✅ Your ticket has been opened: ${ch}`, ephemeral: true });
+    } catch (e) {
+      console.error("Ticket create error:", e);
+      await interaction.reply({ content: "Failed to create ticket. Make sure the bot has the right permissions.", ephemeral: true });
+    }
+    return;
   }
 });
 
@@ -298,10 +359,9 @@ client.on("messageCreate", async message => {
         await message.reply({ embeds: [embed] });
         break;
       }
-      case "uptime": {
+      case "uptime":
         await message.reply(`⏱️ Bot has been online for **${formatUptime(Date.now() - startTime)}**`);
         break;
-      }
       case "userinfo": {
         const user = targetUser || message.author;
         const member = targetMember || message.member;
@@ -342,10 +402,9 @@ client.on("messageCreate", async message => {
         await message.reply({ embeds: [new EmbedBuilder().setTitle(`🖼️ ${user.tag}'s Avatar`).setImage(user.displayAvatarURL({ size: 512 })).setColor(0x5865f2)] });
         break;
       }
-      case "membercount": {
+      case "membercount":
         await message.reply(`👥 **${message.guild.name}** has **${message.guild.memberCount}** members.`);
         break;
-      }
 
       // ── Utility ──────────────────────────────────────────────────────────
       case "poll": {
@@ -365,7 +424,7 @@ client.on("messageCreate", async message => {
       }
       case "math": {
         const expr = args.join(" ");
-        if (!expr) return void message.reply("Usage: `!math <expression>` — e.g. `!math 5 * (3 + 2)^2`");
+        if (!expr) return void message.reply("Usage: `!math <expression>` — e.g. `!math 5^2 + 3*4`");
         const result = safeMath(expr);
         if (result === null) return void message.reply("❌ Invalid or unsafe expression. Only numbers and `+ - * / % ^ ( )` allowed.");
         await message.reply({ embeds: [new EmbedBuilder().setTitle("🧮 Math").setDescription(`**Expression:** \`${expr}\`\n**Result:** \`${result}\``).setColor(0x5865f2)] });
@@ -450,7 +509,7 @@ client.on("messageCreate", async message => {
         const [a, b, c] = [s(), s(), s()];
         const win = a === b && b === c;
         const twoMatch = a === b || b === c || a === c;
-        let resultText = win ? "🎉 **JACKPOT! You hit three of a kind!**" : twoMatch ? "✨ **Two of a kind! Almost there!**" : "❌ **No match. Try again!**";
+        const resultText = win ? "🎉 **JACKPOT! Three of a kind!**" : twoMatch ? "✨ **Two of a kind! Almost!**" : "❌ **No match. Try again!**";
         await message.reply({ embeds: [new EmbedBuilder()
           .setTitle("🎰 Slots")
           .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}`)
@@ -466,7 +525,7 @@ client.on("messageCreate", async message => {
         const optionsText = Object.entries(choiceMap).map(([l, v]) => `**${l})** ${v}`).join("\n");
         await message.reply({ embeds: [new EmbedBuilder()
           .setTitle("🧠 Trivia")
-          .setDescription(`${q.q}\n\n${optionsText}\n\n*Type A, B, C, or D to answer — you have 15 seconds!*`)
+          .setDescription(`${q.q}\n\n${optionsText}\n\n*Type A, B, C, or D — you have 15 seconds!*`)
           .setColor(0x5865f2)] });
         const filter = m => m.author.id === message.author.id && ["a","b","c","d"].includes(m.content.toLowerCase());
         const collector = message.channel.createMessageCollector({ filter, time: 15000, max: 1 });
@@ -477,7 +536,7 @@ client.on("messageCreate", async message => {
           else
             await message.channel.send(`❌ **Wrong!** The correct answer was **${correctLetter}) ${q.a}**. Better luck next time, ${message.author}!`);
         });
-        collector.on("end", (collected) => {
+        collector.on("end", collected => {
           if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${correctLetter}) ${q.a}**.`).catch(()=>{});
         });
         break;
@@ -505,7 +564,7 @@ client.on("messageCreate", async message => {
           else
             await message.channel.send(`❌ **Not quite!** The answer was **${riddle.a}**. Good try, ${message.author}!`);
         });
-        collector.on("end", (collected) => {
+        collector.on("end", collected => {
           if (!collected.size) message.channel.send(`⏰ Time's up! The answer was **${riddle.a}**.`).catch(()=>{});
         });
         break;
@@ -517,7 +576,7 @@ client.on("messageCreate", async message => {
         activeGames.set(message.author.id, true);
         await message.reply({ embeds: [new EmbedBuilder()
           .setTitle("🔢 Number Guessing Game")
-          .setDescription("I'm thinking of a number between **1 and 100**.\nYou have **7 attempts** — type your guesses in chat!")
+          .setDescription("I'm thinking of a number between **1 and 100**.\nYou have **7 attempts** — type your guesses!")
           .setColor(0x5865f2)] });
         const filter = m => m.author.id === message.author.id && !isNaN(m.content) && m.content.trim() !== "";
         const collector = message.channel.createMessageCollector({ filter, time: 60000, max: 7 });
@@ -571,13 +630,21 @@ client.on("messageCreate", async message => {
       }
       case "role": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        const action = args[0]?.toLowerCase();
-        const role = message.mentions.roles.first();
-        if (!targetMember || !role || !["add","remove"].includes(action))
-          return void message.reply("Usage: `!role <add|remove> @user @role`");
-        if (action === "add") await targetMember.roles.add(role);
-        else await targetMember.roles.remove(role);
-        await message.reply(`✅ ${action === "add" ? "Added" : "Removed"} role **${role.name}** ${action === "add" ? "to" : "from"} **${targetUser.tag}**`);
+        if (!targetMember) return void message.reply("Usage: `!role @user <role name>`");
+        // Support role mention OR role name search
+        const role = message.mentions.roles.first() || (() => {
+          const nameQuery = args.slice(1).join(" ").replace(/<@&\d+>/g, "").trim().toLowerCase();
+          return nameQuery ? message.guild.roles.cache.find(r => r.name.toLowerCase() === nameQuery || r.name.toLowerCase().startsWith(nameQuery)) : null;
+        })();
+        if (!role) return void message.reply("Role not found. Usage: `!role @user <role name>` or `!role @user @role`");
+        const hasRole = targetMember.roles.cache.has(role.id);
+        if (hasRole) {
+          await targetMember.roles.remove(role);
+          await message.reply(`✅ Removed **${role.name}** from **${targetUser.tag}**`);
+        } else {
+          await targetMember.roles.add(role);
+          await message.reply(`✅ Added **${role.name}** to **${targetUser.tag}**`);
+        }
         break;
       }
       case "setwelcome": {
@@ -598,6 +665,67 @@ client.on("messageCreate", async message => {
         const ch = await client.channels.fetch(chId);
         await ch.send({ embeds: [new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" })] });
         await message.reply("✅ Preview sent!");
+        break;
+      }
+      case "ticketsetup": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
+        const categoryId = args.find(a => /^\d{17,19}$/.test(a));
+        const role = message.mentions.roles.first();
+        if (!categoryId && !role) return void message.reply("Usage: `!ticketsetup <category-id> [@staff-role]`");
+        setConfig(message.guild.id, {
+          ...(categoryId ? { ticketCategory: categoryId } : {}),
+          ...(role ? { ticketRole: role.id } : {}),
+        });
+        await message.reply(`✅ Ticket config updated.${categoryId ? ` Category: \`${categoryId}\`` : ""}${role ? ` Staff role: ${role}` : ""}`);
+        break;
+      }
+      case "ticketpanel": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
+
+        const imagePath = path.join(__dirname, "assets", "662.png");
+        const hasImage = fs.existsSync(imagePath);
+
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId(TICKET_SELECT)
+          .setPlaceholder("Choose a category...")
+          .addOptions(
+            new StringSelectMenuOptionBuilder()
+              .setLabel("🔐 Access")
+              .setDescription("Request access to something")
+              .setValue("access"),
+            new StringSelectMenuOptionBuilder()
+              .setLabel("🤝 Allies")
+              .setDescription("Alliance & partnership requests")
+              .setValue("allies"),
+            new StringSelectMenuOptionBuilder()
+              .setLabel("🛒 Buying")
+              .setDescription("Purchasing & buying inquiries")
+              .setValue("buying"),
+          );
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎫 Open a Support Ticket")
+          .setDescription(
+            "Need help? Select a category from the menu below and a private ticket will be opened for you.\n\n" +
+            "🔐 **Access** — Request access to something\n" +
+            "🤝 **Allies** — Alliance & partnership requests\n" +
+            "🛒 **Buying** — Purchasing & buying inquiries"
+          )
+          .setColor(0xe91e8c)
+          .setFooter({ text: "662 Support • Only you and staff can see your ticket" })
+          .setTimestamp();
+
+        if (hasImage) {
+          const attachment = new AttachmentBuilder(imagePath, { name: "662.png" });
+          embed.setImage("attachment://662.png");
+          await message.channel.send({ embeds: [embed], files: [attachment], components: [row] });
+        } else {
+          await message.channel.send({ embeds: [embed], components: [row] });
+        }
+
+        if (message.deletable) await message.delete().catch(()=>{});
         break;
       }
       case "setmodlog": {
@@ -648,7 +776,7 @@ client.on("messageCreate", async message => {
       }
       case "untimeout": case "rto": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
-        if (!targetMember) return void message.reply("Usage: `!untimeout @user`");
+        if (!targetMember) return void message.reply("Usage: `!rto @user`");
         await targetMember.timeout(null);
         await message.reply(`✅ Removed timeout from **${targetUser.tag}**`);
         break;
@@ -730,7 +858,7 @@ client.on("messageCreate", async message => {
         const gMsg = await message.channel.send({ embeds: [embed], components: [row] });
         giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
         scheduleGiveaway(client, gMsg.id, ms);
-        await message.reply(`✅ Giveaway started!`);
+        await message.reply("✅ Giveaway started!");
         break;
       }
 
@@ -781,9 +909,11 @@ client.on("messageCreate", async message => {
               value: [
                 "`!say [#channel] <message>` — Make the bot say something",
                 "`!announce #channel <title> | <message>` — Post an announcement",
-                "`!role <add|remove> @user @role` — Add or remove a role",
-                "`!setwelcome #channel <message>` — Set welcome message (`{user}`, `{server}`, `{count}`)",
+                "`!role @user <role name>` — Toggle a role (adds if missing, removes if present)",
+                "`!setwelcome #channel <message>` — Set welcome message",
                 "`!testwelcome` — Preview the welcome message",
+                "`!ticketsetup <category-id> [@staff-role]` — Configure ticket system",
+                "`!ticketpanel` — Post the ticket panel with dropdown",
                 "`!setmodlog #channel` — Set the mod log channel",
               ].join("\n"),
             },
