@@ -91,6 +91,7 @@ const economy = {
 function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
+const OWNER_ID = "1449567336012054575"; // only this user can use !givemoney
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
 const TICKET_CLOSE   = "ticket_close";
@@ -678,6 +679,18 @@ client.on("messageCreate", async message => {
           .setTitle("🎲 Dice Duel")
           .setDescription(`You rolled **${you}**, house rolled **${house}**.\n${tie ? "🤝 Tie — bet refunded." : win ? `🎉 You won **${fmtMoney(bet)}**!` : `😢 You lost **${fmtMoney(bet)}**.`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
+        break;
+      }
+      case "givemoney": {
+        if (message.author.id !== OWNER_ID) return void message.reply("🚫 This command is locked — only the owner can use it.");
+        const user = targetUser || message.author;
+        const amount = Math.floor(Number(args.find(a => /^-?\d+$/.test(a)) || 0));
+        if (!amount) return void message.reply("Usage: `!givemoney [@user] <amount>`");
+        const updated = economy.add(message.guild.id, user.id, amount);
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("💸 Chips Granted")
+          .setDescription(`Gave **${fmtMoney(amount)}** to ${user}.\nNew balance: ${fmtMoney(updated.balance)}`)
+          .setColor(0xffd700)] });
         break;
       }
       case "leaderboard": case "lb": {
