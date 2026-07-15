@@ -58,20 +58,23 @@ const reminders = {
 };
 
 // ─── Casino economy ─────────────────────────────────────────────────────────
-// Per-guild, per-user wallets: { "guildId:userId": { balance, lastDaily, lastWork, lastSteal } }
+// Per-guild, per-user wallets: { "guildId:userId": { balance, bank, lastDaily, lastWork, lastSteal, lastGrab } }
+// `balance` is your wallet (cash on hand) — it's what !steal can take.
+// `bank` is safe from !steal; move money there with !deposit.
 const STARTING_BALANCE = 500;
+const DEFAULT_ACCOUNT = { balance: STARTING_BALANCE, bank: 0, lastDaily: 0, lastWork: 0, lastSteal: 0, lastGrab: 0 };
 const economy = {
   key(guildId, userId) { return `${guildId}:${userId}`; },
   get(guildId, userId) {
     const d = loadJSON("economy.json", {});
     const k = this.key(guildId, userId);
-    if (!d[k]) { d[k] = { balance: STARTING_BALANCE, lastDaily: 0, lastWork: 0, lastSteal: 0 }; saveJSON("economy.json", d); }
-    return d[k];
+    if (!d[k]) { d[k] = { ...DEFAULT_ACCOUNT }; saveJSON("economy.json", d); }
+    return { ...DEFAULT_ACCOUNT, ...d[k] };
   },
   set(guildId, userId, changes) {
     const d = loadJSON("economy.json", {});
     const k = this.key(guildId, userId);
-    d[k] = { ...(d[k] || { balance: STARTING_BALANCE, lastDaily: 0, lastWork: 0, lastSteal: 0 }), ...changes };
+    d[k] = { ...DEFAULT_ACCOUNT, ...(d[k] || {}), ...changes };
     saveJSON("economy.json", d);
     return d[k];
   },
@@ -83,7 +86,7 @@ const economy = {
     const d = loadJSON("economy.json", {});
     return Object.entries(d)
       .filter(([k]) => k.startsWith(`${guildId}:`))
-      .map(([k, v]) => ({ userId: k.split(":")[1], balance: v.balance }))
+      .map(([k, v]) => ({ userId: k.split(":")[1], balance: (v.balance || 0) + (v.bank || 0) }))
       .sort((a, b) => b.balance - a.balance)
       .slice(0, limit);
   },
@@ -561,9 +564,69 @@ client.on("messageCreate", async message => {
         const user = targetUser || message.author;
         const acc = economy.get(message.guild.id, user.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle(`💳 ${user.username}'s Wallet`)
-          .setDescription(fmtMoney(acc.balance))
+          .setTitle(`💳 ${user.username}'s Balance`)
+          .addFields(
+            { name: "Wallet (stealable)", value: fmtMoney(acc.balance), inline: true },
+            { name: "Bank (safe)", value: fmtMoney(acc.bank), inline: true },
+          )
           .setColor(0xe91e8c)] });
+        break;
+      }
+      case "bank": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🏦 Your Bank")
+          .setDescription(`${fmtMoney(acc.bank)} stored safely — this can't be stolen.\nWallet: ${fmtMoney(acc.balance)}`)
+          .setColor(0x5865f2)] });
+        break;
+      }
+      case "deposit": case "dep": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const amount = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
+        if (!amount || amount < 1) return void message.reply("Usage: `!deposit <amount|all>`");
+        if (amount > acc.balance) return void message.reply(`You only have ${fmtMoney(acc.balance)} in your wallet.`);
+        const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance - amount, bank: acc.bank + amount });
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🏦 Deposited")
+          .setDescription(`Moved **${fmtMoney(amount)}** into your bank.\nWallet: ${fmtMoney(updated.balance)} | Bank: ${fmtMoney(updated.bank)}`)
+          .setColor(0x57f287)] });
+        break;
+      }
+      case "withdraw": case "with": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const amount = args[0] === "all" ? acc.bank : Math.floor(Number(args[0]));
+        if (!amount || amount < 1) return void message.reply("Usage: `!withdraw <amount|all>`");
+        if (amount > acc.bank) return void message.reply(`You only have ${fmtMoney(acc.bank)} in your bank.`);
+        const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, bank: acc.bank - amount });
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle("🏦 Withdrew")
+          .setDescription(`Moved **${fmtMoney(amount)}** back into your wallet.\nWallet: ${fmtMoney(updated.balance)} | Bank: ${fmtMoney(updated.bank)}`)
+          .setColor(0x57f287)] });
+        break;
+      }
+      case "grab": {
+        const acc = economy.get(message.guild.id, message.author.id);
+        const cooldown = 900000; // 15 min
+        const remaining = acc.lastGrab + cooldown - Date.now();
+        if (remaining > 0) return void message.reply(`⏳ Nothing new to find yet. Try again in **${formatUptime(remaining)}**.`);
+        const roll = Math.random();
+        if (roll < 0.15) {
+          // Whiff — found nothing this time.
+          economy.set(message.guild.id, message.author.id, { lastGrab: Date.now() });
+          const misses = ["You checked the couch cushions and found lint.","You looked around but came up empty-handed.","Someone beat you to it — no luck this time."];
+          await message.reply({ embeds: [new EmbedBuilder().setTitle("🔍 Nothing Found").setDescription(misses[Math.floor(Math.random()*misses.length)]).setColor(0x99aab5)] });
+          break;
+        }
+        const jackpot = roll > 0.97; // rare big find
+        const amount = jackpot ? 500 + Math.floor(Math.random() * 501) : 10 + Math.floor(Math.random() * 91); // 10-100, or 500-1000
+        const finds = jackpot
+          ? ["You found a dropped wallet stuffed with cash!","You stumbled on a hidden stash!","You found an envelope of cash taped under a bench!"]
+          : ["You found some loose change on the ground.","You found a few crumpled bills in your pocket.","You found some coins in a vending machine tray.","You found a bit of cash on the sidewalk."];
+        const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastGrab: Date.now() });
+        await message.reply({ embeds: [new EmbedBuilder()
+          .setTitle(jackpot ? "🤑 Jackpot Find!" : "🔍 Found Money!")
+          .setDescription(`${finds[Math.floor(Math.random()*finds.length)]}\nYou grabbed **${fmtMoney(amount)}**!\nWallet: ${fmtMoney(updated.balance)}`)
+          .setColor(jackpot ? 0xffd700 : 0x57f287)] });
         break;
       }
       case "daily": {
@@ -611,7 +674,7 @@ client.on("messageCreate", async message => {
         if (remaining > 0) return void message.reply(`⏳ Lay low for **${formatUptime(remaining)}** before your next heist.`);
         const victim = economy.get(message.guild.id, user.id);
         economy.set(message.guild.id, message.author.id, { lastSteal: Date.now() });
-        if (victim.balance < 50) return void message.reply(`${user.username} is broke — nothing worth stealing.`);
+        if (victim.balance < 50) return void message.reply(`${user.username}'s wallet is thin (their bank is safe) — nothing worth stealing.`);
         const success = Math.random() < 0.4; // 40% success
         if (success) {
           const amount = Math.floor(victim.balance * (0.1 + Math.random() * 0.25)); // 10-35%
@@ -709,7 +772,7 @@ client.on("messageCreate", async message => {
           const u = await client.users.fetch(e.userId).catch(() => null);
           return `**${i + 1}.** ${u ? u.username : "Unknown User"} — ${fmtMoney(e.balance)}`;
         }));
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 662 Casino Leaderboard").setDescription(lines.join("\n")).setColor(0xffd700)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 662 Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
         break;
       }
 
@@ -1059,15 +1122,19 @@ client.on("messageCreate", async message => {
             {
               name: "🎰 662 Casino",
               value: [
-                "`!balance [@user]` — Check your (or someone's) chip balance",
+                "`!balance [@user]` — Check your (or someone's) wallet + bank",
                 "`!daily` — Claim your daily chips (every 24h)",
                 "`!work` — Earn chips (every 1h)",
+                "`!grab` — Look around for loose chips (every 15min)",
+                "`!bank` — Check your bank balance",
+                "`!deposit <amount|all>` — Move chips into your bank (safe from !steal)",
+                "`!withdraw <amount|all>` — Move chips back into your wallet",
                 "`!give <@user> <amount>` — Send chips to someone",
-                "`!steal <@user>` — Attempt to rob someone's chips (40% success, 30min cooldown)",
+                "`!steal <@user>` — Attempt to rob someone's wallet chips (40% success, 30min cooldown, bank is safe)",
                 "`!coinflip <amount|all> <heads|tails>` — Bet on a coin flip",
                 "`!slots <amount|all>` — Spin the slots",
                 "`!dice <amount|all>` — Roll against the house",
-                "`!leaderboard` — Top chip holders in the server",
+                "`!leaderboard` — Richest by net worth (wallet + bank)",
               ].join("\n"),
             },
             {
