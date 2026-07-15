@@ -253,6 +253,13 @@ function welcomeImageAttachment() {
   return new AttachmentBuilder(WELCOME_IMAGE_PATH, { name: "welcome.png" });
 }
 
+// ─── Leave banner image ─────────────────────────────────────────────────────
+const LEAVE_IMAGE_PATH = path.join(__dirname, "assets", "leave.png");
+function leaveImageAttachment() {
+  if (!fs.existsSync(LEAVE_IMAGE_PATH)) return null;
+  return new AttachmentBuilder(LEAVE_IMAGE_PATH, { name: "leave.png" });
+}
+
 // ─── Giveaway banner image ─────────────────────────────────────────────────
 const GIVEAWAY_IMAGE_PATH = path.join(__dirname, "assets", "giveaway.png");
 function giveawayImageAttachment() {
@@ -301,6 +308,28 @@ client.on("guildMemberAdd", async member => {
     if (attachment) embed.setImage("attachment://welcome.png");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Welcome error:", e); }
+});
+
+// ─── Leave ─────────────────────────────────────────────────────────────────
+client.on("guildMemberRemove", async member => {
+  const cfg = getConfig(member.guild.id);
+  const chId = cfg.leaveChannel || process.env.LEAVE_CHANNEL_ID;
+  if (!chId) return;
+  const msg = cfg.leaveMsg || `**${member.user.username}** has left **${member.guild.name}**. We're down to ${member.guild.memberCount} members.`;
+  try {
+    const ch = await client.channels.fetch(chId);
+    const formatted = msg
+      .replace(/{user}/g, `${member}`)
+      .replace(/{username}/g, member.user.username)
+      .replace(/{tag}/g, member.user.tag)
+      .replace(/{server}/g, member.guild.name)
+      .replace(/{count}/g, member.guild.memberCount)
+      .replace(/{membercount}/g, member.guild.memberCount);
+    const attachment = leaveImageAttachment();
+    const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
+    if (attachment) embed.setImage("attachment://leave.png");
+    await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
+  } catch(e) { console.error("Leave error:", e); }
 });
 
 // ─── Snipe: track deleted messages ─────────────────────────────────────────
@@ -869,6 +898,29 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Preview sent!");
         break;
       }
+      case "setleave": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
+        const ch = message.mentions.channels.first();
+        const msg = message.content.slice(PREFIX.length + "setleave".length).replace(/<#\d+>/, "").trim();
+        if (!ch) return void message.reply("Usage: `!setleave #channel <message>` — use {user}, {server}, {count}");
+        setConfig(message.guild.id, { leaveChannel: ch.id, leaveMsg: msg || undefined });
+        await message.reply(`✅ Leave messages will be sent to ${ch}${msg ? ` with custom message.` : ` with default message.`}`);
+        break;
+      }
+      case "testleave": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
+        const cfg = getConfig(message.guild.id);
+        const chId = cfg.leaveChannel || process.env.LEAVE_CHANNEL_ID;
+        if (!chId) return void message.reply("No leave channel set. Use `!setleave #channel` first.");
+        const msg = cfg.leaveMsg || `**${message.author.username}** has left **${message.guild.name}**. We're down to ${message.guild.memberCount} members.`;
+        const ch = await client.channels.fetch(chId);
+        const previewAttachment = leaveImageAttachment();
+        const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
+        if (previewAttachment) previewEmbed.setImage("attachment://leave.png");
+        await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
+        await message.reply("✅ Preview sent!");
+        break;
+      }
       case "ticketsetup": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         const categoryId = args.find(a => /^\d{17,19}$/.test(a));
@@ -1145,6 +1197,8 @@ client.on("messageCreate", async message => {
                 "`!role <user> | <role>` — Toggle a role by name or mention (no ping needed), e.g. `!role Sam | Moderator`",
                 "`!setwelcome #channel <message>` — Set welcome message",
                 "`!testwelcome` — Preview the welcome message",
+                "`!setleave #channel <message>` — Set leave message",
+                "`!testleave` — Preview the leave message",
                 "`!ticketsetup <category-id> [staff-role name or ID]` — Configure ticket system",
                 "`!ticketpanel` — Post the ticket panel with dropdown",
                 "`!setmodlog #channel` — Set the mod log channel",
