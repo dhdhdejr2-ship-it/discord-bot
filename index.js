@@ -1182,7 +1182,18 @@ client.on("messageCreate", async message => {
         break;
       }
 
-      default: return;
+      default: {
+        // Not a real command — check if it matches a trigger anyway, since
+        // people will type things like "!access" without knowing it's not
+        // a registered command.
+        const content = message.content.toLowerCase();
+        const match = triggers.all(message.guild.id).find(t => content.includes(t.phrase.toLowerCase()));
+        if (match) {
+          await message.delete().catch(() => {});
+          await message.channel.send({ content: match.response, allowedMentions: { parse: [] } }).catch(() => {});
+        }
+        return;
+      }
     }
   } catch (err) {
     console.error(`Error in !${cmd}:`, err);
