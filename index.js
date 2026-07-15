@@ -37,6 +37,26 @@ const warnings = {
   },
 };
 
+// Custom triggers (auto-responder), like Dyno: when a message contains the
+// trigger phrase, the bot deletes that message and posts the preset response.
+const triggers = {
+  all(guildId) { return loadJSON("triggers.json", {})[guildId] || []; },
+  add(guildId, trigger) {
+    const d = loadJSON("triggers.json", {});
+    d[guildId] = d[guildId] || [];
+    d[guildId].push(trigger);
+    saveJSON("triggers.json", d);
+  },
+  remove(guildId, phrase) {
+    const d = loadJSON("triggers.json", {});
+    const list = d[guildId] || [];
+    const kept = list.filter(t => t.phrase.toLowerCase() !== phrase.toLowerCase());
+    d[guildId] = kept;
+    saveJSON("triggers.json", d);
+    return list.length - kept.length;
+  },
+};
+
 const giveaways = {
   add(g) { const d = loadJSON("giveaways.json"); d.push(g); saveJSON("giveaways.json", d); },
   get(messageId) { return loadJSON("giveaways.json").find(g => g.messageId === messageId); },
@@ -331,6 +351,16 @@ client.on("messageCreate", async message => {
       await message.reply(`💤 **${user.username}** is AFK: ${reason} (since <t:${Math.floor(since/1000)}:R>)`).catch(()=>{});
     }
   }
+});
+
+// ─── Triggers (auto-responder) ──────────────────────────────────────────────
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild || message.content.startsWith(PREFIX)) return;
+  const content = message.content.toLowerCase();
+  const match = triggers.all(message.guild.id).find(t => content.includes(t.phrase.toLowerCase()));
+  if (!match) return;
+  await message.delete().catch(() => {});
+  await message.channel.send({ content: match.response, allowedMentions: { parse: [] } }).catch(() => {});
 });
 
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
@@ -1011,6 +1041,53 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Giveaway started!");
         break;
       }
+      case "gend": case "endgiveaway": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        let messageId = args[0];
+        if (!messageId) {
+          // No ID given — end the most recent active giveaway in this channel.
+          const active = giveaways.all().filter(g => g.channelId === message.channel.id && !g.ended);
+          if (!active.length) return void message.reply("No active giveaway in this channel. Usage: `!gend <messageId>`");
+          messageId = active[active.length - 1].messageId;
+        }
+        const g = giveaways.get(messageId);
+        if (!g) return void message.reply("Couldn't find a giveaway with that message ID.");
+        if (g.ended) return void message.reply("That giveaway has already ended.");
+        await endGiveaway(client, messageId);
+        await message.reply("✅ Giveaway ended early.");
+        break;
+      }
+
+      // ── Triggers (auto-responder, like Dyno) ────────────────────────────
+      case "trigger": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
+        const sub = (args[0] || "").toLowerCase();
+        const usage = "Usage: `!trigger add <phrase> | <response>`, `!trigger remove <phrase>`, `!trigger list`";
+        if (sub === "add") {
+          const rest = args.slice(1).join(" ");
+          if (!rest.includes("|")) return void message.reply(`Please separate the phrase and response with \`|\`.\n\n${usage}`);
+          const [phrase, response] = rest.split("|").map(s => s.trim());
+          if (!phrase || !response) return void message.reply(usage);
+          triggers.add(message.guild.id, { phrase, response, addedBy: message.author.id });
+          await message.reply(`✅ Trigger added: when a message contains **"${phrase}"**, I'll delete it and reply with your response.`);
+        } else if (sub === "remove" || sub === "delete") {
+          const phrase = args.slice(1).join(" ");
+          if (!phrase) return void message.reply(usage);
+          const removed = triggers.remove(message.guild.id, phrase);
+          await message.reply(removed ? `🗑️ Removed trigger **"${phrase}"**.` : "Couldn't find a trigger with that exact phrase.");
+        } else if (sub === "list") {
+          const list = triggers.all(message.guild.id);
+          if (!list.length) return void message.reply("No triggers set up yet.");
+          const embed = new EmbedBuilder()
+            .setTitle("⚡ Triggers")
+            .setDescription(list.map(t => `**"${t.phrase}"** → ${t.response}`).join("\n"))
+            .setColor(0x5865f2);
+          await message.reply({ embeds: [embed] });
+        } else {
+          await message.reply(usage);
+        }
+        break;
+      }
 
       // ── Help ─────────────────────────────────────────────────────────────
       case "help": {
@@ -1086,7 +1163,18 @@ client.on("messageCreate", async message => {
             },
             {
               name: "🎁 Giveaway",
-              value: "`!giveaway <duration> <winners> <prize>` — Start a giveaway\nExample: `!giveaway 10m 1 Nitro`",
+              value: [
+                "`!giveaway <duration> <winners> <prize>` — Start a giveaway, e.g. `!giveaway 10m 1 Nitro`",
+                "`!gend [messageId]` — End a giveaway early (defaults to the latest one in this channel)",
+              ].join("\n"),
+            },
+            {
+              name: "⚡ Triggers",
+              value: [
+                "`!trigger add <phrase> | <response>` — Auto-reply when a message contains the phrase (message gets deleted)",
+                "`!trigger remove <phrase>` — Remove a trigger",
+                "`!trigger list` — List all triggers",
+              ].join("\n"),
             },
           )
           .setFooter({ text: `Prefix: ! • CRIMSON EM#9236` });
