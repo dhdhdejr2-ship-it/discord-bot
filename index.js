@@ -1126,6 +1126,49 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Giveaway started!");
         break;
       }
+      case "glist": case "giveawaylist": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        let messageId = args[0];
+        if (!messageId) {
+          const active = giveaways.all().filter(g => g.channelId === message.channel.id && !g.ended);
+          if (!active.length) {
+            // Fall back to most recent ended giveaway in this channel
+            const all = giveaways.all().filter(g => g.channelId === message.channel.id);
+            if (!all.length) return void message.reply("No giveaways found in this channel. Usage: `!glist <messageId>`");
+            messageId = all[all.length - 1].messageId;
+          } else {
+            messageId = active[active.length - 1].messageId;
+          }
+        }
+        const g = giveaways.get(messageId);
+        if (!g) return void message.reply("Couldn't find a giveaway with that message ID.");
+        if (!g.participants.length) {
+          return void message.reply({ embeds: [new EmbedBuilder().setTitle(`🎁 Giveaway Participants — ${g.prize}`).setDescription("Nobody has entered yet.").setColor(0xfee75c)] });
+        }
+        // Resolve IDs to usernames in batches
+        const names = await Promise.all(
+          g.participants.map(async (id, i) => {
+            try {
+              const u = await client.users.fetch(id);
+              return `${i + 1}. ${u.username} (\`${id}\`)`;
+            } catch {
+              return `${i + 1}. Unknown User (\`${id}\`)`;
+            }
+          })
+        );
+        const status = g.ended ? "Ended" : "Active";
+        const chunks = [];
+        for (let i = 0; i < names.length; i += 30) chunks.push(names.slice(i, i + 30));
+        for (let p = 0; p < chunks.length; p++) {
+          const embed = new EmbedBuilder()
+            .setTitle(`🎁 ${g.prize} — Participants (${g.participants.length}) [${status}]`)
+            .setDescription(chunks[p].join("\n"))
+            .setColor(0xfee75c)
+            .setFooter({ text: `Page ${p + 1}/${chunks.length} • Message ID: ${messageId}` });
+          await message.channel.send({ embeds: [embed] });
+        }
+        break;
+      }
       case "gend": case "endgiveaway": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         let messageId = args[0];
@@ -1226,6 +1269,7 @@ client.on("messageCreate", async message => {
               value: [
                 "`!giveaway <duration> <winners> <prize>` — Start a giveaway, e.g. `!giveaway 10m 1 Nitro`",
                 "`!gend [messageId]` — End a giveaway early (defaults to the latest one in this channel)",
+                "`!glist [messageId]` — See everyone who entered a giveaway",
               ].join("\n"),
             },
           )
