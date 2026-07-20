@@ -372,8 +372,29 @@ client.on("interactionCreate", async interaction => {
     const g = giveaways.get(interaction.message.id);
     if (!g || g.ended) return interaction.reply({ content: "This giveaway has ended.", ephemeral: true });
     if (g.participants.includes(interaction.user.id)) return interaction.reply({ content: "You're already entered!", ephemeral: true });
-    giveaways.update(g.messageId, { participants: [...g.participants, interaction.user.id] });
-    return interaction.reply({ content: "🎉 You're entered in the giveaway!", ephemeral: true });
+    const updatedParticipants = [...g.participants, interaction.user.id];
+    giveaways.update(g.messageId, { participants: updatedParticipants });
+
+    // Update the giveaway panel to show who's entered
+    try {
+      const oldEmbed = interaction.message.embeds[0];
+      // Build participants display (mentions, max ~40 before truncating)
+      const MAX_SHOW = 40;
+      const mentions = updatedParticipants.slice(0, MAX_SHOW).map(id => `<@${id}>`).join(", ");
+      const overflow = updatedParticipants.length > MAX_SHOW ? ` +${updatedParticipants.length - MAX_SHOW} more` : "";
+      const participantField = { name: `🎟️ Entries — ${updatedParticipants.length}`, value: mentions + overflow, inline: false };
+
+      // Rebuild embed, replacing any existing entries field
+      const updatedEmbed = EmbedBuilder.from(oldEmbed);
+      const fields = (oldEmbed.fields || []).filter(f => !f.name.startsWith("🎟️ Entries"));
+      updatedEmbed.setFields([...fields, participantField]);
+
+      await interaction.update({ embeds: [updatedEmbed], components: interaction.message.components });
+    } catch(e) {
+      console.error("Giveaway panel update error:", e);
+      await interaction.reply({ content: "🎉 You're entered in the giveaway!", ephemeral: true });
+    }
+    return;
   }
 
   // ── Ticket close button ──
@@ -1117,7 +1138,8 @@ client.on("messageCreate", async message => {
           .setDescription(`**Prize:** ${prize}\n**Winners:** ${winCount}\n**Ends:** <t:${Math.floor((Date.now()+ms)/1000)}:R>`)
           .setColor(0xffd700)
           .setFooter({ text: `Hosted by ${message.author.tag}` })
-          .setTimestamp(Date.now() + ms);
+          .setTimestamp(Date.now() + ms)
+          .setFields({ name: "🎟️ Entries — 0", value: "Nobody yet — be the first!", inline: false });
         const giveawayAttachment = giveawayImageAttachment();
         if (giveawayAttachment) embed.setImage("attachment://giveaway.png");
         const gMsg = await message.channel.send({ embeds: [embed], components: [row], files: giveawayAttachment ? [giveawayAttachment] : [] });
