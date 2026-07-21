@@ -405,40 +405,32 @@ client.on("interactionCreate", async interaction => {
 
     await interaction.reply("🔒 Ticket closed.");
 
-    // Generate transcript
-    let transcriptStatus = "⚠️ No transcript channel configured. Run `!settranscript #channel`.";
+    // Save transcript to hardcoded channel
     try {
-      const cfg = getConfig(interaction.guild.id);
-      if (cfg.transcriptChannel) {
-        // Use fetch() not cache.get() so it works even if channel isn't cached
-        const transcriptCh = await interaction.guild.channels.fetch(cfg.transcriptChannel).catch(() => null);
-        if (!transcriptCh) {
-          transcriptStatus = `❌ Transcript channel <#${cfg.transcriptChannel}> not found. Re-run `!settranscript #channel`.`;
-        } else {
-          const fetched = await interaction.channel.messages.fetch({ limit: 100 });
-          const sorted = [...fetched.values()].reverse();
-          const msgLines = sorted.map(m => {
-            const time = new Date(m.createdTimestamp).toLocaleString("en-GB", { timeZone: "UTC" });
-            const content = m.content || (m.embeds.length ? "[embed]" : "") || (m.attachments.size ? "[attachment]" : "");
-            return `[${time}] ${m.author.username}: ${content}`;
-          });
-          const text = msgLines.join("\n");
-          const file = new AttachmentBuilder(Buffer.from(text, "utf8"), { name: `transcript-${interaction.channel.name}.txt` });
-          const transcriptEmbed = new EmbedBuilder()
-            .setTitle("📋 Ticket Transcript")
-            .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.username}\n**Messages:** ${sorted.length}`)
-            .setColor(0xe91e8c)
-            .setTimestamp();
-          await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
-          transcriptStatus = `✅ Transcript saved to ${transcriptCh}.`;
-        }
+      const transcriptCh = await interaction.guild.channels.fetch("1480283062284845060").catch(() => null);
+      if (transcriptCh) {
+        const fetched = await interaction.channel.messages.fetch({ limit: 100 });
+        const sorted = [...fetched.values()].reverse();
+        const msgLines = sorted.map(m => {
+          const time = new Date(m.createdTimestamp).toLocaleString("en-GB", { timeZone: "UTC" });
+          const content = m.content || (m.embeds.length ? "[embed]" : "") || (m.attachments.size ? "[attachment]" : "");
+          return `[${time}] ${m.author.username}: ${content}`;
+        });
+        const file = new AttachmentBuilder(
+          Buffer.from(msgLines.join("\n"), "utf8"),
+          { name: `transcript-${interaction.channel.name}.txt` }
+        );
+        const transcriptEmbed = new EmbedBuilder()
+          .setTitle("📋 Ticket Transcript")
+          .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.username}\n**Messages:** ${sorted.length}`)
+          .setColor(0xe91e8c)
+          .setTimestamp();
+        await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
       }
     } catch (e) {
-      transcriptStatus = `❌ Transcript error: ${e.message}`;
-      console.error("Transcript error:", e.message, e.stack);
+      console.error("Transcript error:", e.message);
     }
 
-    await interaction.user.send(`📋 **Ticket ${interaction.channel.name}**\n${transcriptStatus}`).catch(()=>{});
     await interaction.channel.delete().catch(()=>{});
     return;
   }
