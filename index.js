@@ -409,33 +409,33 @@ client.on("interactionCreate", async interaction => {
     // Generate transcript
     try {
       const cfg = getConfig(interaction.guild.id);
-      if (cfg.transcriptChannel) {
+      if (!cfg.transcriptChannel) {
+        // No transcript channel configured — just delete
+      } else {
         const transcriptCh = interaction.guild.channels.cache.get(cfg.transcriptChannel);
         if (transcriptCh) {
           const fetched = await interaction.channel.messages.fetch({ limit: 100 });
           const sorted = [...fetched.values()].reverse();
-          const lines = sorted.map(m => {
+          const msgLines = sorted.map(m => {
             const time = new Date(m.createdTimestamp).toLocaleString("en-GB", { timeZone: "UTC" });
             const content = m.content || (m.embeds.length ? "[embed]" : "") || (m.attachments.size ? "[attachment]" : "");
-            return `[${time}] ${m.author.tag}: ${content}`;
+            return `[${time}] ${m.author.username}: ${content}`;
           });
-          const text = lines.join("\n");
-          const buf = Buffer.from(text, "utf8");
-          const { AttachmentBuilder: AB } = require("discord.js");
-          const file = new AB(buf, { name: `transcript-${interaction.channel.name}.txt` });
-          const embed = new EmbedBuilder()
+          const text = msgLines.join("\n");
+          const file = new AttachmentBuilder(Buffer.from(text, "utf8"), { name: `transcript-${interaction.channel.name}.txt` });
+          const transcriptEmbed = new EmbedBuilder()
             .setTitle("📋 Ticket Transcript")
-            .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.tag}\n**Messages:** ${sorted.length}`)
+            .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.username}\n**Messages:** ${sorted.length}`)
             .setColor(0xe91e8c)
             .setTimestamp();
-          await transcriptCh.send({ embeds: [embed], files: [file] });
+          await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
         }
       }
     } catch (e) {
-      console.error("Transcript error:", e);
+      console.error("Transcript error:", e.message, e.stack);
     }
 
-    interaction.channel.delete().catch(()=>{});
+    await interaction.channel.delete().catch(()=>{});
     return;
   }
 
