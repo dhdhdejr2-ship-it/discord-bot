@@ -399,7 +399,6 @@ client.on("interactionCreate", async interaction => {
 
   // ── Ticket close button ──
   if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
-    // Staff only — must have ManageChannels
     if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels)) {
       return interaction.reply({ content: "❌ Only staff can close tickets.", ephemeral: true });
     }
@@ -407,13 +406,14 @@ client.on("interactionCreate", async interaction => {
     await interaction.reply("🔒 Ticket closed.");
 
     // Generate transcript
+    let transcriptStatus = "⚠️ No transcript channel set. Use `!settranscript #channel` to configure one.";
     try {
       const cfg = getConfig(interaction.guild.id);
-      if (!cfg.transcriptChannel) {
-        // No transcript channel configured — just delete
-      } else {
+      if (cfg.transcriptChannel) {
         const transcriptCh = interaction.guild.channels.cache.get(cfg.transcriptChannel);
-        if (transcriptCh) {
+        if (!transcriptCh) {
+          transcriptStatus = `❌ Transcript channel ID ${cfg.transcriptChannel} not found in cache.`;
+        } else {
           const fetched = await interaction.channel.messages.fetch({ limit: 100 });
           const sorted = [...fetched.values()].reverse();
           const msgLines = sorted.map(m => {
@@ -429,11 +429,16 @@ client.on("interactionCreate", async interaction => {
             .setColor(0xe91e8c)
             .setTimestamp();
           await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
+          transcriptStatus = `✅ Transcript sent to ${transcriptCh}.`;
         }
       }
     } catch (e) {
+      transcriptStatus = `❌ Transcript error: ${e.message}`;
       console.error("Transcript error:", e.message, e.stack);
     }
+
+    // DM the closer with transcript result before channel deletes
+    await interaction.user.send(`📋 **Ticket ${interaction.channel.name}**\n${transcriptStatus}`).catch(()=>{});
 
     await interaction.channel.delete().catch(()=>{});
     return;
