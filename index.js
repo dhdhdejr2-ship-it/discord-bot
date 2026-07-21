@@ -399,12 +399,12 @@ client.on("interactionCreate", async interaction => {
 
   // ── Ticket close button ──
   if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
-    const canClose =
-      interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels) ||
-      interaction.channel.name.includes(interaction.user.username.toLowerCase());
-    if (!canClose) return interaction.reply({ content: "You can't close this ticket.", ephemeral: true });
+    // Staff only — must have ManageChannels
+    if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return interaction.reply({ content: "❌ Only staff can close tickets.", ephemeral: true });
+    }
 
-    await interaction.reply("🔒 Closing ticket in 5 seconds...");
+    await interaction.reply("🔒 Ticket closed.");
 
     // Generate transcript
     try {
@@ -435,7 +435,7 @@ client.on("interactionCreate", async interaction => {
       console.error("Transcript error:", e);
     }
 
-    setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
+    interaction.channel.delete().catch(()=>{});
     return;
   }
 
