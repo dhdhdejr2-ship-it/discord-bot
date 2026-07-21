@@ -403,7 +403,38 @@ client.on("interactionCreate", async interaction => {
       interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels) ||
       interaction.channel.name.includes(interaction.user.username.toLowerCase());
     if (!canClose) return interaction.reply({ content: "You can't close this ticket.", ephemeral: true });
+
     await interaction.reply("🔒 Closing ticket in 5 seconds...");
+
+    // Generate transcript
+    try {
+      const cfg = getConfig(interaction.guild.id);
+      if (cfg.transcriptChannel) {
+        const transcriptCh = interaction.guild.channels.cache.get(cfg.transcriptChannel);
+        if (transcriptCh) {
+          const fetched = await interaction.channel.messages.fetch({ limit: 100 });
+          const sorted = [...fetched.values()].reverse();
+          const lines = sorted.map(m => {
+            const time = new Date(m.createdTimestamp).toLocaleString("en-GB", { timeZone: "UTC" });
+            const content = m.content || (m.embeds.length ? "[embed]" : "") || (m.attachments.size ? "[attachment]" : "");
+            return `[${time}] ${m.author.tag}: ${content}`;
+          });
+          const text = lines.join("\n");
+          const buf = Buffer.from(text, "utf8");
+          const { AttachmentBuilder: AB } = require("discord.js");
+          const file = new AB(buf, { name: `transcript-${interaction.channel.name}.txt` });
+          const embed = new EmbedBuilder()
+            .setTitle("📋 Ticket Transcript")
+            .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.tag}\n**Messages:** ${sorted.length}`)
+            .setColor(0xe91e8c)
+            .setTimestamp();
+          await transcriptCh.send({ embeds: [embed], files: [file] });
+        }
+      }
+    } catch (e) {
+      console.error("Transcript error:", e);
+    }
+
     setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
     return;
   }
@@ -1027,6 +1058,14 @@ client.on("messageCreate", async message => {
         if (!ch) return void message.reply("Usage: `!setmodlog #channel`");
         setConfig(message.guild.id, { modlogChannel: ch.id });
         await message.reply(`✅ Mod log set to ${ch}`);
+        break;
+      }
+      case "settranscript": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
+        const ch = message.mentions.channels.first();
+        if (!ch) return void message.reply("Usage: `!settranscript #channel`");
+        setConfig(message.guild.id, { transcriptChannel: ch.id });
+        await message.reply(`✅ Transcript channel set to ${ch}`);
         break;
       }
 
