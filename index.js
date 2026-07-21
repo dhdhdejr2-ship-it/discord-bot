@@ -447,8 +447,10 @@ client.on("interactionCreate", async interaction => {
         .setFooter({ text: "662 Support • Click Close Ticket when done" })
         .setTimestamp();
 
-      const pingContent = cfg.ticketRole ? `${user} <@&${cfg.ticketRole}>` : `${user}`;
-      await ch.send({ content: pingContent, embeds: [embed], components: [closeRow] });
+      await ch.send({ content: `${user}`, embeds: [embed], components: [closeRow] });
+      if (cfg.ticketRole) {
+        await ch.send({ content: `📢 <@&${cfg.ticketRole}> — New **${cat.label.replace(/^[^ ]+ /, "")} ** ticket opened by ${user}. Please assist when available.` });
+      }
       await interaction.reply({ content: `✅ Your ticket has been opened: ${ch}`, ephemeral: true });
     } catch (e) {
       console.error("Ticket create error:", e);
