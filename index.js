@@ -406,13 +406,14 @@ client.on("interactionCreate", async interaction => {
     await interaction.reply("🔒 Ticket closed.");
 
     // Generate transcript
-    let transcriptStatus = "⚠️ No transcript channel set. Use `!settranscript #channel` to configure one.";
+    let transcriptStatus = "⚠️ No transcript channel configured. Run `!settranscript #channel`.";
     try {
       const cfg = getConfig(interaction.guild.id);
       if (cfg.transcriptChannel) {
-        const transcriptCh = interaction.guild.channels.cache.get(cfg.transcriptChannel);
+        // Use fetch() not cache.get() so it works even if channel isn't cached
+        const transcriptCh = await interaction.guild.channels.fetch(cfg.transcriptChannel).catch(() => null);
         if (!transcriptCh) {
-          transcriptStatus = `❌ Transcript channel ID ${cfg.transcriptChannel} not found in cache.`;
+          transcriptStatus = `❌ Transcript channel <#${cfg.transcriptChannel}> not found. Re-run `!settranscript #channel`.`;
         } else {
           const fetched = await interaction.channel.messages.fetch({ limit: 100 });
           const sorted = [...fetched.values()].reverse();
@@ -429,7 +430,7 @@ client.on("interactionCreate", async interaction => {
             .setColor(0xe91e8c)
             .setTimestamp();
           await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
-          transcriptStatus = `✅ Transcript sent to ${transcriptCh}.`;
+          transcriptStatus = `✅ Transcript saved to ${transcriptCh}.`;
         }
       }
     } catch (e) {
@@ -437,9 +438,7 @@ client.on("interactionCreate", async interaction => {
       console.error("Transcript error:", e.message, e.stack);
     }
 
-    // DM the closer with transcript result before channel deletes
     await interaction.user.send(`📋 **Ticket ${interaction.channel.name}**\n${transcriptStatus}`).catch(()=>{});
-
     await interaction.channel.delete().catch(()=>{});
     return;
   }
