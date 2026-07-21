@@ -959,7 +959,7 @@ client.on("messageCreate", async message => {
       case "ticketpanel": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
 
-        const imagePath = path.join(__dirname, "assets", "662.png");
+        const imagePath = path.join(__dirname, "assets", "ltd.png");
         const hasImage = fs.existsSync(imagePath);
 
         const selectMenu = new StringSelectMenuBuilder()
