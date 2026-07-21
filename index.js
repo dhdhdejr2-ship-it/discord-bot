@@ -102,9 +102,9 @@ const TICKET_CLOSE   = "ticket_close";
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const TICKET_CATEGORIES = {
-  access:  { label: "🔐 Access",  description: "Request access to something",  color: 0xe91e8c },
-  allies:  { label: "🤝 Allies",  description: "Alliance & partnership requests", color: 0xe91e8c },
-  buying:  { label: "🛒 Buying",  description: "Purchasing & buying inquiries", color: 0xe91e8c },
+  access:  { label: "🔓 Free Access", description: "Join the gang & get turf access",  color: 0xe91e8c },
+  allies:  { label: "🤝 Allies",      description: "Alliance & partnership requests",   color: 0xe91e8c },
+  support: { label: "🎫 Support",     description: "Questions, help & general support", color: 0xe91e8c },
 };
 
 const startTime = Date.now();
@@ -964,31 +964,43 @@ client.on("messageCreate", async message => {
 
         const selectMenu = new StringSelectMenuBuilder()
           .setCustomId(TICKET_SELECT)
-          .setPlaceholder("Choose a category...")
+          .setPlaceholder("Select a ticket category...")
           .addOptions(
             new StringSelectMenuOptionBuilder()
-              .setLabel("🔐 Access")
-              .setDescription("Request access to something")
+              .setLabel("🔓 Free Access")
+              .setDescription("Join the gang & get turf access")
               .setValue("access"),
             new StringSelectMenuOptionBuilder()
               .setLabel("🤝 Allies")
               .setDescription("Alliance & partnership requests")
               .setValue("allies"),
             new StringSelectMenuOptionBuilder()
-              .setLabel("🛒 Buying")
-              .setDescription("Purchasing & buying inquiries")
-              .setValue("buying"),
+              .setLabel("🎫 Support")
+              .setDescription("Questions, help & general support")
+              .setValue("support"),
           );
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
         const embed = new EmbedBuilder()
-          .setTitle("🎫 Open a Support Ticket")
+          .setTitle("🎫 Support Ticket")
           .setDescription(
-            "Need help? Select a category from the menu below and a private ticket will be opened for you.\n\n" +
-            "🔐 **Access** — Request access to something\n" +
-            "🤝 **Allies** — Alliance & partnership requests\n" +
-            "🛒 **Buying** — Purchasing & buying inquiries"
+            "Welcome to our support panel! We have a couple of different support options so please choose the option that fits your request. " +
+            "Once your ticket is opened our staff team will assist you as soon as possible.\n\u200b"
+          )
+          .addFields(
+            {
+              name: "🔓 Free Access",
+              value: "Please use the free access option if you're looking to join this gang and get access to our future turf.",
+            },
+            {
+              name: "🤝 Allies",
+              value: "Please use the allies option if you want to ally with us.",
+            },
+            {
+              name: "🎫 Support",
+              value: "Please use the support option if you have any questions or need help with something.",
+            },
           )
           .setColor(0xe91e8c)
           .setFooter({ text: "662 Support • Only you and staff can see your ticket" })
