@@ -451,10 +451,12 @@ client.on("interactionCreate", async interaction => {
       if (cfg.ticketRole) {
         await ch.send({ content: `📢 <@&${cfg.ticketRole}> — New **${cat.label.replace(/^[^ ]+ /, "")} ** ticket opened by ${user}. Please assist when available.` });
       }
-      await interaction.reply({ content: `✅ Your ticket has been opened: ${ch}`, ephemeral: true });
+      if (!interaction.replied) await interaction.reply({ content: `✅ Your ticket has been opened: ${ch}`, ephemeral: true });
     } catch (e) {
       console.error("Ticket create error:", e);
-      await interaction.reply({ content: "Failed to create ticket. Make sure the bot has the right permissions.", ephemeral: true });
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: `❌ Failed to create ticket: ${e.message}`, ephemeral: true }).catch(()=>{});
+      }
     }
     return;
   }
