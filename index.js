@@ -398,42 +398,49 @@ client.on("interactionCreate", async interaction => {
   }
 
   // ── Ticket close button ──
-  if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
-    if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      return interaction.reply({ content: "❌ Only staff can close tickets.", ephemeral: true });
-    }
+    if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
+      console.log("[CLOSE] clicked by", interaction.user.username, "perms:", interaction.member?.permissions.toArray().join(","));
 
-    await interaction.reply("🔒 Ticket closed.");
+      if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        console.log("[CLOSE] denied — no ManageChannels");
+        return interaction.reply({ content: "Only staff can close tickets.", ephemeral: true });
+      }
 
-    // Save transcript to hardcoded channel
-    try {
-      const transcriptCh = await interaction.guild.channels.fetch("1480283062284845060").catch(() => null);
-      if (transcriptCh) {
+      await interaction.reply("Closing ticket and saving transcript...");
+
+      try {
+        console.log("[CLOSE] fetching transcript ch 1480283062284845060");
+        const transcriptCh = await interaction.guild.channels.fetch("1480283062284845060");
+        console.log("[CLOSE] got ch:", transcriptCh ? transcriptCh.name : "null");
+
         const fetched = await interaction.channel.messages.fetch({ limit: 100 });
         const sorted = [...fetched.values()].reverse();
-        const msgLines = sorted.map(m => {
-          const time = new Date(m.createdTimestamp).toLocaleString("en-GB", { timeZone: "UTC" });
-          const content = m.content || (m.embeds.length ? "[embed]" : "") || (m.attachments.size ? "[attachment]" : "");
-          return `[${time}] ${m.author.username}: ${content}`;
+        console.log("[CLOSE] messages:", sorted.length);
+
+        const lines2 = sorted.map(m => {
+          const t = new Date(m.createdTimestamp).toISOString().replace("T"," ").slice(0,19);
+          const body = m.content || (m.embeds.length ? "[embed]" : m.attachments.size ? "[file]" : "");
+          return "[" + t + "] " + m.author.username + ": " + body;
         });
-        const file = new AttachmentBuilder(
-          Buffer.from(msgLines.join("\n"), "utf8"),
-          { name: `transcript-${interaction.channel.name}.txt` }
-        );
-        const transcriptEmbed = new EmbedBuilder()
-          .setTitle("📋 Ticket Transcript")
-          .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.username}\n**Messages:** ${sorted.length}`)
+
+        const buf = Buffer.from(lines2.join("\n"), "utf8");
+        const file = new AttachmentBuilder(buf, { name: "transcript-" + interaction.channel.name + ".txt" });
+
+        const embed = new EmbedBuilder()
+          .setTitle("Ticket Transcript")
+          .setDescription("Channel: " + interaction.channel.name + "\nClosed by: " + interaction.user.username + "\nMessages: " + sorted.length)
           .setColor(0xe91e8c)
           .setTimestamp();
-        await transcriptCh.send({ embeds: [transcriptEmbed], files: [file] });
-      }
-    } catch (e) {
-      console.error("Transcript error:", e.message);
-    }
 
-    await interaction.channel.delete().catch(()=>{});
-    return;
-  }
+        await transcriptCh.send({ embeds: [embed], files: [file] });
+        console.log("[CLOSE] transcript sent OK");
+      } catch (err) {
+        console.error("[CLOSE] transcript FAILED:", err.message);
+      }
+
+      await interaction.channel.delete().catch(e => console.error("[CLOSE] delete err:", e.message));
+      return;
+    }
 
   // ── Ticket category select menu ──
   if (interaction.isStringSelectMenu() && interaction.customId === TICKET_SELECT) {
