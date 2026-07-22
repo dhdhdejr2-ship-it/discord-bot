@@ -1,6 +1,40 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, AttachmentBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, AttachmentBuilder, REST, Routes } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+
+    // ─── Slash command definitions ──────────────────────────────────────────────
+    const SLASH_CMDS = [
+    { name:"ping",        description:"Check bot latency" },
+    { name:"botinfo",     description:"Bot info and stats" },
+    { name:"uptime",      description:"Bot uptime" },
+    { name:"userinfo",    description:"User info", options:[{type:6,name:"user",description:"User (defaults to you)"}] },
+    { name:"serverinfo",  description:"Server information" },
+    { name:"avatar",      description:"Get a user's avatar", options:[{type:6,name:"user",description:"User (defaults to you)"}] },
+    { name:"membercount", description:"Server member count" },
+    { name:"kick",        description:"Kick a member", default_member_permissions:"8", options:[{type:6,name:"user",description:"User to kick",required:true},{type:3,name:"reason",description:"Reason"}] },
+    { name:"ban",         description:"Ban a member",  default_member_permissions:"4", options:[{type:6,name:"user",description:"User to ban",required:true},{type:3,name:"reason",description:"Reason"}] },
+    { name:"unban",       description:"Unban a user",  default_member_permissions:"4", options:[{type:3,name:"userid",description:"User ID to unban",required:true}] },
+    { name:"timeout",     description:"Timeout a member", default_member_permissions:"1099511627776", options:[{type:6,name:"user",description:"User",required:true},{type:3,name:"duration",description:"Duration e.g. 10m 1h 1d",required:true},{type:3,name:"reason",description:"Reason"}] },
+    { name:"untimeout",   description:"Remove timeout", default_member_permissions:"1099511627776", options:[{type:6,name:"user",description:"User",required:true}] },
+    { name:"warn",        description:"Warn a member", default_member_permissions:"8192", options:[{type:6,name:"user",description:"User",required:true},{type:3,name:"reason",description:"Reason",required:true}] },
+    { name:"warnings",    description:"View warnings for a user", options:[{type:6,name:"user",description:"User",required:true}] },
+    { name:"clearwarnings",description:"Clear all warnings for a user", default_member_permissions:"8", options:[{type:6,name:"user",description:"User",required:true}] },
+    { name:"clear",       description:"Delete messages", default_member_permissions:"8192", options:[{type:4,name:"amount",description:"Number of messages (1-100)",required:true,min_value:1,max_value:100}] },
+    { name:"lock",        description:"Lock the current channel", default_member_permissions:"8192" },
+    { name:"unlock",      description:"Unlock the current channel", default_member_permissions:"8192" },
+    { name:"slowmode",    description:"Set slowmode", default_member_permissions:"8192", options:[{type:4,name:"seconds",description:"Seconds (0 = off)",required:true,min_value:0,max_value:21600}] },
+    { name:"say",         description:"Make the bot say something", default_member_permissions:"8", options:[{type:3,name:"message",description:"Message to send",required:true}] },
+    { name:"poll",        description:"Create a poll", options:[{type:3,name:"question",description:"Poll question",required:true}] },
+    { name:"ticketpanel", description:"Post the ticket panel", default_member_permissions:"8" },
+    { name:"ticketsetup", description:"Setup ticket system", default_member_permissions:"8", options:[{type:7,name:"channel",description:"Ticket category channel",required:true},{type:8,name:"role",description:"Staff role",required:true}] },
+    { name:"settranscript",description:"Set transcript channel", default_member_permissions:"8", options:[{type:7,name:"channel",description:"Transcript channel",required:true}] },
+    { name:"balance",     description:"Check your coin balance" },
+    { name:"daily",       description:"Claim your daily coins" },
+    { name:"leaderboard", description:"Economy leaderboard" },
+    { name:"coinflip",    description:"Flip a coin", options:[{type:3,name:"side",description:"heads or tails",required:true,choices:[{name:"Heads",value:"heads"},{name:"Tails",value:"tails"}]},{type:4,name:"bet",description:"Amount to bet",required:true,min_value:1}] },
+    { name:"giveaway",    description:"Start a giveaway", default_member_permissions:"8192", options:[{type:3,name:"duration",description:"Duration e.g. 1h 30m",required:true},{type:3,name:"prize",description:"Prize description",required:true},{type:4,name:"winners",description:"Number of winners (default 1)",min_value:1}] },
+    ];
+    
 
 // ─── Storage ───────────────────────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, "data");
@@ -368,6 +402,282 @@ client.on("messageCreate", async message => {
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
   // ── Giveaway button ──
+
+    // ── Slash commands ──────────────────────────────────────────────────────────
+    if (interaction.isChatInputCommand()) {
+      const { commandName, guild, member, user, channel } = interaction;
+      const hasPerm = (p) => member?.permissions.has(p);
+      await interaction.deferReply({ ephemeral: false }).catch(()=>{});
+
+      // ── Info commands ──
+      if (commandName === "ping") {
+        return interaction.editReply(`🏓 Pong! Latency: **${Date.now() - interaction.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**`);
+      }
+      if (commandName === "uptime") {
+        return interaction.editReply(`⏱️ Uptime: **${formatUptime(Date.now() - startTime)}**`);
+      }
+      if (commandName === "membercount") {
+        await guild.members.fetch();
+        const total = guild.memberCount, bots = guild.members.cache.filter(m=>m.user.bot).size;
+        return interaction.editReply(`👥 **${guild.name}** — ${total} members (${total-bots} humans, ${bots} bots)`);
+      }
+      if (commandName === "serverinfo") {
+        const g = guild;
+        await g.members.fetch();
+        const bots = g.members.cache.filter(m=>m.user.bot).size;
+        const e = new EmbedBuilder()
+          .setTitle(g.name).setThumbnail(g.iconURL({size:256}))
+          .setColor(0xe91e8c)
+          .addFields(
+            {name:"Owner",value:`<@${g.ownerId}>`,inline:true},
+            {name:"Members",value:`${g.memberCount}`,inline:true},
+            {name:"Bots",value:`${bots}`,inline:true},
+            {name:"Channels",value:`${g.channels.cache.size}`,inline:true},
+            {name:"Roles",value:`${g.roles.cache.size}`,inline:true},
+            {name:"Created",value:`<t:${Math.floor(g.createdTimestamp/1000)}:R>`,inline:true},
+          ).setFooter({text:`ID: ${g.id}`}).setTimestamp();
+        return interaction.editReply({embeds:[e]});
+      }
+      if (commandName === "userinfo") {
+        const target = interaction.options.getUser("user") || user;
+        const m = await guild.members.fetch(target.id).catch(()=>null);
+        const e = new EmbedBuilder()
+          .setTitle(target.username).setThumbnail(target.displayAvatarURL({size:256}))
+          .setColor(0xe91e8c)
+          .addFields(
+            {name:"ID",value:target.id,inline:true},
+            {name:"Joined Discord",value:`<t:${Math.floor(target.createdTimestamp/1000)}:R>`,inline:true},
+            {name:"Joined Server",value:m?`<t:${Math.floor(m.joinedTimestamp/1000)}:R>`:"N/A",inline:true},
+            {name:"Roles",value:m?m.roles.cache.filter(r=>r.id!==guild.id).map(r=>r.toString()).join(" ")||"None":"N/A"},
+          ).setTimestamp();
+        return interaction.editReply({embeds:[e]});
+      }
+      if (commandName === "avatar") {
+        const target = interaction.options.getUser("user") || user;
+        const e = new EmbedBuilder().setTitle(`${target.username}'s Avatar`).setImage(target.displayAvatarURL({size:512})).setColor(0xe91e8c);
+        return interaction.editReply({embeds:[e]});
+      }
+
+      // ── Economy ──
+      if (commandName === "balance") {
+        const bal = economy.get(user.id) || { wallet:0, bank:0 };
+        const e = new EmbedBuilder().setTitle(`${user.username}'s Balance`).setColor(0xe91e8c)
+          .addFields({name:"👛 Wallet",value:`${bal.wallet} coins`,inline:true},{name:"🏦 Bank",value:`${bal.bank} coins`,inline:true});
+        return interaction.editReply({embeds:[e]});
+      }
+      if (commandName === "daily") {
+        const bal = economy.get(user.id) || { wallet:0, bank:0, lastDaily:0 };
+        const now = Date.now(), cd = 86400000;
+        if (now - (bal.lastDaily||0) < cd) {
+          const left = cd - (now - bal.lastDaily);
+          return interaction.editReply(`⏳ Already claimed! Next daily: <t:${Math.floor((Date.now()+left)/1000)}:R>`);
+        }
+        const reward = Math.floor(Math.random()*400)+100;
+        economy.update(user.id, {wallet:(bal.wallet||0)+reward, lastDaily:now});
+        return interaction.editReply(`✅ You claimed **${reward} coins**! New wallet: **${(bal.wallet||0)+reward}**`);
+      }
+      if (commandName === "leaderboard") {
+        const all = economy.all().sort((a,b)=>(b.wallet+b.bank)-(a.wallet+a.bank)).slice(0,10);
+        const rows = await Promise.all(all.map(async(e,i)=>{
+          const u = await client.users.fetch(e.id).catch(()=>null);
+          return `**${i+1}.** ${u?u.username:"Unknown"} — ${e.wallet+e.bank} coins`;
+        }));
+        const em = new EmbedBuilder().setTitle("🏆 Leaderboard").setColor(0xe91e8c).setDescription(rows.join("\n"));
+        return interaction.editReply({embeds:[em]});
+      }
+      if (commandName === "coinflip") {
+        const side = interaction.options.getString("side");
+        const bet  = interaction.options.getInteger("bet");
+        const bal  = economy.get(user.id) || {wallet:0,bank:0};
+        if (bet > bal.wallet) return interaction.editReply(`❌ You only have **${bal.wallet} coins** in your wallet.`);
+        const result = Math.random()<0.5?"heads":"tails";
+        const won = result===side;
+        economy.update(user.id,{wallet:bal.wallet+(won?bet:-bet)});
+        return interaction.editReply(won?`🪙 It's **${result}** — you won **${bet} coins**! New balance: **${bal.wallet+bet}**`:`🪙 It's **${result}** — you lost **${bet} coins**. New balance: **${bal.wallet-bet}**`);
+      }
+
+      // ── Moderation ──
+      if (commandName === "kick") {
+        if (!hasPerm(PermissionFlagsBits.KickMembers)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const reason = interaction.options.getString("reason") || "No reason";
+        const m = await guild.members.fetch(target.id).catch(()=>null);
+        if (!m) return interaction.editReply("❌ Member not found.");
+        await m.kick(reason);
+        return interaction.editReply(`✅ Kicked **${target.username}** — ${reason}`);
+      }
+      if (commandName === "ban") {
+        if (!hasPerm(PermissionFlagsBits.BanMembers)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const reason = interaction.options.getString("reason") || "No reason";
+        await guild.members.ban(target.id, { reason });
+        return interaction.editReply(`✅ Banned **${target.username}** — ${reason}`);
+      }
+      if (commandName === "unban") {
+        if (!hasPerm(PermissionFlagsBits.BanMembers)) return interaction.editReply("❌ No permission.");
+        const userid = interaction.options.getString("userid");
+        await guild.members.unban(userid).catch(()=>{});
+        return interaction.editReply(`✅ Unbanned user ${userid}`);
+      }
+      if (commandName === "timeout") {
+        if (!hasPerm(PermissionFlagsBits.ModerateMembers)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const dur    = parseDuration(interaction.options.getString("duration"));
+        const reason = interaction.options.getString("reason") || "No reason";
+        if (!dur) return interaction.editReply("❌ Invalid duration. Use e.g. 10m, 1h, 1d");
+        const m = await guild.members.fetch(target.id).catch(()=>null);
+        if (!m) return interaction.editReply("❌ Member not found.");
+        await m.timeout(dur, reason);
+        return interaction.editReply(`✅ Timed out **${target.username}** for ${interaction.options.getString("duration")} — ${reason}`);
+      }
+      if (commandName === "untimeout") {
+        if (!hasPerm(PermissionFlagsBits.ModerateMembers)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const m = await guild.members.fetch(target.id).catch(()=>null);
+        if (!m) return interaction.editReply("❌ Member not found.");
+        await m.timeout(null);
+        return interaction.editReply(`✅ Removed timeout from **${target.username}**`);
+      }
+      if (commandName === "warn") {
+        if (!hasPerm(PermissionFlagsBits.ManageMessages)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const reason = interaction.options.getString("reason");
+        warnings.add({guildId:guild.id,userId:target.id,reason,mod:user.username,date:new Date().toISOString()});
+        const count = warnings.forUser(guild.id,target.id).length;
+        return interaction.editReply(`⚠️ Warned **${target.username}** — ${reason} (total: ${count})`);
+      }
+      if (commandName === "warnings") {
+        const target = interaction.options.getUser("user");
+        const ws = warnings.forUser(guild.id, target.id);
+        if (!ws.length) return interaction.editReply(`✅ **${target.username}** has no warnings.`);
+        const e = new EmbedBuilder().setTitle(`⚠️ Warnings — ${target.username}`).setColor(0xff9900)
+          .setDescription(ws.map((w,i)=>`**${i+1}.** ${w.reason} — *${w.mod}* (${w.date?.slice(0,10)||"?"})`).join("\n"));
+        return interaction.editReply({embeds:[e]});
+      }
+      if (commandName === "clearwarnings") {
+        if (!hasPerm(PermissionFlagsBits.Administrator)) return interaction.editReply("❌ No permission.");
+        const target = interaction.options.getUser("user");
+        const n = warnings.clear(guild.id, target.id);
+        return interaction.editReply(`✅ Cleared **${n}** warnings for **${target.username}**`);
+      }
+      if (commandName === "clear") {
+        if (!hasPerm(PermissionFlagsBits.ManageMessages)) return interaction.editReply("❌ No permission.");
+        const amount = interaction.options.getInteger("amount");
+        const deleted = await channel.bulkDelete(amount, true).catch(()=>null);
+        return interaction.editReply(`🗑️ Deleted **${deleted?.size||0}** messages.`);
+      }
+      if (commandName === "lock") {
+        if (!hasPerm(PermissionFlagsBits.ManageChannels)) return interaction.editReply("❌ No permission.");
+        await channel.permissionOverwrites.edit(guild.roles.everyone,{SendMessages:false});
+        return interaction.editReply("🔒 Channel locked.");
+      }
+      if (commandName === "unlock") {
+        if (!hasPerm(PermissionFlagsBits.ManageChannels)) return interaction.editReply("❌ No permission.");
+        await channel.permissionOverwrites.edit(guild.roles.everyone,{SendMessages:null});
+        return interaction.editReply("🔓 Channel unlocked.");
+      }
+      if (commandName === "slowmode") {
+        if (!hasPerm(PermissionFlagsBits.ManageChannels)) return interaction.editReply("❌ No permission.");
+        const secs = interaction.options.getInteger("seconds");
+        await channel.setRateLimitPerUser(secs);
+        return interaction.editReply(secs===0?"✅ Slowmode disabled.":`✅ Slowmode set to **${secs}s**`);
+      }
+      if (commandName === "say") {
+        if (!hasPerm(PermissionFlagsBits.Administrator)) return interaction.editReply("❌ No permission.");
+        const msg = interaction.options.getString("message");
+        await channel.send(msg);
+        return interaction.editReply({content:"✅ Sent.",ephemeral:true}).catch(()=>{});
+      }
+      if (commandName === "poll") {
+        const question = interaction.options.getString("question");
+        const e = new EmbedBuilder().setTitle("📊 Poll").setDescription(question).setColor(0xe91e8c)
+          .setFooter({text:`Poll by ${user.username}`}).setTimestamp();
+        const msg = await channel.send({embeds:[e]});
+        await msg.react("✅"); await msg.react("❌");
+        return interaction.editReply({content:"✅ Poll posted.",ephemeral:true}).catch(()=>{});
+      }
+
+      // ── Ticket setup ──
+      if (commandName === "ticketpanel") {
+        if (!hasPerm(PermissionFlagsBits.Administrator)) return interaction.editReply("❌ No permission.");
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder().setCustomId(TICKET_SELECT).setPlaceholder("Select a ticket category...")
+            .addOptions(Object.entries(TICKET_CATEGORIES).map(([val,cat])=>
+              new StringSelectMenuOptionBuilder().setValue(val).setLabel(cat.label).setDescription(cat.description)
+            ))
+        );
+        const e = new EmbedBuilder()
+          .setTitle("🎟️ LTD | Loyalty Till Death | Support")
+          .setDescription("Need help or want to join the gang? Open a ticket below and our staff team will assist you.")
+          .setColor(0xe91e8c)
+          .addFields(
+            {name:"🔓 Free Access",value:"Want to join LTD and get access to our turf? Open here.",inline:false},
+            {name:"🤝 Allies",value:"Interested in forming an alliance or partnership? Open here.",inline:false},
+            {name:"🎫 Support",value:"Have a question or need help with anything? Open here.",inline:false},
+          )
+          .setImage("https://raw.githubusercontent.com/dhdhdejr2-ship-it/discord-bot/main/assets/ltd.png")
+          .setFooter({text:"LTD | 662 • Loyalty Till Death"}).setTimestamp();
+        await channel.send({embeds:[e],components:[row]});
+        return interaction.editReply({content:"✅ Ticket panel posted.",ephemeral:true}).catch(()=>{});
+      }
+      if (commandName === "ticketsetup") {
+        if (!hasPerm(PermissionFlagsBits.Administrator)) return interaction.editReply("❌ No permission.");
+        const ch   = interaction.options.getChannel("channel");
+        const role = interaction.options.getRole("role");
+        setConfig(guild.id, { ticketCategory: ch.id, ticketRole: role.id });
+        return interaction.editReply(`✅ Ticket category: ${ch} | Staff role: ${role}`);
+      }
+      if (commandName === "settranscript") {
+        if (!hasPerm(PermissionFlagsBits.Administrator)) return interaction.editReply("❌ No permission.");
+        const ch = interaction.options.getChannel("channel");
+        setConfig(guild.id, { transcriptChannel: ch.id });
+        return interaction.editReply(`✅ Transcript channel set to ${ch}`);
+      }
+
+      // ── Giveaway ──
+      if (commandName === "giveaway") {
+        if (!hasPerm(PermissionFlagsBits.ManageMessages)) return interaction.editReply("❌ No permission.");
+        const dur     = parseDuration(interaction.options.getString("duration"));
+        const prize   = interaction.options.getString("prize");
+        const winners = interaction.options.getInteger("winners") || 1;
+        if (!dur) return interaction.editReply("❌ Invalid duration. Use e.g. 1h, 30m");
+        const endTime = Date.now() + dur;
+        const btn = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("🎉 Enter").setStyle(ButtonStyle.Success)
+        );
+        const e = new EmbedBuilder()
+          .setTitle("🎉 Giveaway!")
+          .addFields(
+            {name:"Prize",value:prize,inline:true},
+            {name:"Winners",value:`${winners}`,inline:true},
+            {name:"Ends",value:`<t:${Math.floor(endTime/1000)}:R>`,inline:true},
+            {name:"Hosted by",value:`${user}`,inline:true},
+          ).setColor(0xe91e8c).setTimestamp(endTime);
+        await interaction.editReply("✅ Giveaway started!");
+        const msg = await channel.send({embeds:[e],components:[btn]});
+        giveaways.update(msg.id,{messageId:msg.id,channelId:channel.id,prize,winners,endTime,participants:[],ended:false,hostedBy:user.id});
+        setTimeout(async()=>{
+          const g = giveaways.get(msg.id);
+          if (!g||g.ended) return;
+          giveaways.update(msg.id,{ended:true});
+          const ps = g.participants;
+          if (!ps.length) return channel.send("🎉 Giveaway ended — no participants.");
+          const picked=[];
+          const pool=[...ps];
+          for(let i=0;i<Math.min(g.winners,pool.length);i++){
+            const idx=Math.floor(Math.random()*pool.length);
+            picked.push(pool.splice(idx,1)[0]);
+          }
+          channel.send(`🎉 Giveaway over! Winner(s): ${picked.map(id=>`<@${id}>`).join(", ")} — **${g.prize}**`);
+        }, dur);
+        return;
+      }
+
+      // Unknown slash command fallback
+      return interaction.editReply("❌ Unknown command.").catch(()=>{});
+    }
+
+    
   if (interaction.isButton() && interaction.customId === GIVEAWAY_BTN) {
     const g = giveaways.get(interaction.message.id);
     if (!g || g.ended) return interaction.reply({ content: "This giveaway has ended.", ephemeral: true });
