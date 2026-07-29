@@ -217,7 +217,7 @@ async function endGiveaway(client, messageId) {
     const shuffled = [...g.participants].sort(() => Math.random() - 0.5);
     const winners = shuffled.slice(0, g.winnerCount);
     const mentions = winners.map(id => `<@${id}>`).join(", ");
-    const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\n**Winner(s):** ${mentions}`).setColor(0xffd700);
+    const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\nThe giveaway has ended.`).setColor(0xffd700);
     await message.edit({ embeds: [embed], components: [] });
     await channel.send(`🎉 The giveaway for **${prize}** has ended!`);
   } catch (e) { console.error("Giveaway end error:", e); }
