@@ -1355,7 +1355,7 @@ dashApp.post("/dashboard/image", authCheck, (req, res) => {
   }
 });
 
-const DASH_PORT = parseInt(process.env.DASHBOARD_PORT || "3001", 10);
+const DASH_PORT = parseInt(process.env.PORT || process.env.DASHBOARD_PORT || "3001", 10);
 dashApp.listen(DASH_PORT, () => console.log(`📊 Dashboard API listening on port ${DASH_PORT}`));
 
 const token = process.env.DISCORD_TOKEN;
