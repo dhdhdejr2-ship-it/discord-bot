@@ -101,6 +101,7 @@ const OWNER_ID = "1449567336012054575"; // only this user can use !givemoney
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
 const TICKET_CLOSE   = "ticket_close";
+const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
 
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
@@ -204,23 +205,36 @@ function safeMath(expr) {
 // ─── Giveaways ─────────────────────────────────────────────────────────────
 async function endGiveaway(client, messageId) {
   const g = giveaways.get(messageId);
-  if (!g || g.ended) return;
-  giveaways.update(messageId, { ended: true });
+  if (!g || g.ended || g.ending) return;
+  giveaways.update(messageId, { ending: true });
   try {
     const channel = await client.channels.fetch(g.channelId);
     const message = await channel.messages.fetch(messageId);
     const prize = g.prize;
     if (!g.participants.length) {
-      const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\n**Winner(s):** No participants!`).setColor(0xed4245);
+      giveaways.update(messageId, { ended: true, ending: false, winners: [] });
+      const embed = EmbedBuilder.from(message.embeds[0])
+        .setTitle("🎉 Giveaway Ended!")
+        .setDescription(`**Prize:** ${prize}\n**Winner(s):** No participants!`)
+        .setColor(0xed4245);
       return await message.edit({ embeds: [embed], components: [] });
     }
     const shuffled = [...g.participants].sort(() => Math.random() - 0.5);
     const winners = shuffled.slice(0, g.winnerCount);
     const mentions = winners.map(id => `<@${id}>`).join(", ");
-    const embed = EmbedBuilder.from(message.embeds[0]).setTitle("🎉 Giveaway Ended!").setDescription(`**Prize:** ${prize}\nThe giveaway has ended.`).setColor(0xffd700);
+    // Save the result before editing/sending so a timer and manual ending
+    // can never announce different results twice.
+    giveaways.update(messageId, { ended: true, ending: false, winners });
+    const embed = EmbedBuilder.from(message.embeds[0])
+      .setTitle("🎉 Giveaway Ended!")
+      .setDescription(`**Prize:** ${prize}\n**Winner(s):** ${mentions}`)
+      .setColor(0xffd700);
     await message.edit({ embeds: [embed], components: [] });
-    await channel.send(`🎉 The giveaway for **${prize}** has ended!`);
-  } catch (e) { console.error("Giveaway end error:", e); }
+    await channel.send(`🎉 Congratulations ${mentions}! You won **${prize}**!`);
+  } catch (e) {
+    giveaways.update(messageId, { ending: false });
+    console.error("Giveaway end error:", e);
+  }
 }
 function scheduleGiveaway(client, messageId, ms) { setTimeout(() => endGiveaway(client, messageId), ms); }
 
@@ -271,7 +285,7 @@ function giveawayImageAttachment() {
 }
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
-    if (g.ended) continue;
+    if (g.ended || g.ending) continue;
     const remaining = new Date(g.endsAt).getTime() - Date.now();
     if (remaining <= 0) endGiveaway(client, g.messageId);
     else scheduleGiveaway(client, g.messageId, remaining);
@@ -366,6 +380,21 @@ client.on("messageCreate", async message => {
       await message.reply(`💤 **${user.username}** is AFK: ${reason} (since <t:${Math.floor(since/1000)}:R>)`).catch(()=>{});
     }
   }
+});
+
+// ─── Anti-link protection ──────────────────────────────────────────────────
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild || !LINK_PATTERN.test(message.content)) return;
+  const cfg = getConfig(message.guild.id);
+  if (!cfg.antiLink) return;
+  if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+
+  await message.delete().catch(() => {});
+  const notice = await message.channel.send({
+    content: `🚫 ${message.author}, links are not allowed in this channel.`,
+    allowedMentions: { users: [message.author.id] },
+  }).catch(() => null);
+  if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
@@ -939,6 +968,41 @@ client.on("messageCreate", async message => {
         }
         break;
       }
+      case "verified": case "verify": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
+        if (!targetMember) return void message.reply("Usage: `!verified @user`");
+
+        let verifiedRole = message.guild.roles.cache.find(r => r.name.toLowerCase() === "verified");
+        if (!verifiedRole) {
+          verifiedRole = await message.guild.roles.create({
+            name: "Verified",
+            color: 0x3498db,
+            reason: "Created by the !verified command",
+          });
+        }
+        if (!verifiedRole.editable) {
+          return void message.reply("I can't manage the **Verified** role. Move it below my bot's highest role.");
+        }
+        if (targetMember.roles.cache.has(verifiedRole.id)) {
+          return void message.reply(`✅ **${targetUser.tag}** is already verified.`);
+        }
+        await targetMember.roles.add(verifiedRole, `Verified by ${message.author.tag}`);
+        await message.reply(`✅ **${targetUser.tag}** is now verified.`);
+        break;
+      }
+      case "antilink": case "anti-link": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
+        const setting = args[0]?.toLowerCase();
+        if (!["on", "off", "status"].includes(setting)) {
+          return void message.reply("Usage: `!antilink <on|off|status>`");
+        }
+        if (setting === "status") {
+          return void message.reply(`🔗 Anti-link is currently **${getConfig(message.guild.id).antiLink ? "ON" : "OFF"}**.`);
+        }
+        setConfig(message.guild.id, { antiLink: setting === "on" });
+        await message.reply(`✅ Anti-link protection is now **${setting.toUpperCase()}**.`);
+        break;
+      }
       case "setwelcome": {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
@@ -1273,13 +1337,90 @@ client.on("messageCreate", async message => {
 
       // ── Help ─────────────────────────────────────────────────────────────
       case "help": {
-        const cmdImagePath = path.join(__dirname, "assets", "commands.png");
-        if (fs.existsSync(cmdImagePath)) {
-          const { AttachmentBuilder: AB } = require("discord.js");
-          const attachment = new AB(cmdImagePath, { name: "commands.png" });
-          await message.reply({ files: [attachment] });
-        } else {
-          await message.reply("Commands image not available.");
+        const helpLines = [
+          "**📖 926von Command List**",
+          "",
+          "**📌 General**",
+          "`!ping` — Check bot latency",
+          "`!botinfo` — Show bot statistics",
+          "`!uptime` — Show bot uptime",
+          "`!userinfo [@user]` — View user information",
+          "`!serverinfo` — View server information",
+          "`!avatar [@user]` — Show an avatar",
+          "`!membercount` — Show server member count",
+          "",
+          "**🔧 Utility**",
+          "`!poll Question? | Option 1 | Option 2` — Create a poll",
+          "`!math <expression>` — Calculate an expression",
+          "`!remind <time> <message>` — Set a reminder",
+          "`!snipe` — Show the latest deleted message",
+          "`!afk [reason]` — Set your AFK status",
+          "`!help` — Show this command list",
+          "",
+          "**💰 Economy & Casino**",
+          "`!balance` / `!bal` — Check your chips",
+          "`!bank` — Check your bank",
+          "`!deposit <amount|all>` — Deposit chips",
+          "`!withdraw <amount|all>` — Withdraw chips",
+          "`!daily` — Claim your daily reward",
+          "`!work` — Work for chips",
+          "`!grab` — Grab a random reward",
+          "`!give @user <amount>` — Give chips",
+          "`!steal @user` — Try to steal chips",
+          "`!coinflip <amount|all>` — Bet on a coin flip",
+          "`!slots <amount|all>` — Play slots",
+          "`!dice <amount|all>` — Play dice",
+          "`!leaderboard` / `!lb` — View the richest members",
+          "",
+          "**🎫 Tickets**",
+          "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
+          "`!ticketpanel` — Post the ticket dropdown",
+          "`!settranscript #channel` — Set transcript channel",
+          "",
+          "**⚙️ Admin**",
+          "`!say [#channel] <message>` — Make the bot say something",
+          "`!announce #channel <title> | <message>` — Send an announcement",
+          "`!role @user <role>` — Toggle a role",
+          "`!verified @user` — Give the Verified role",
+          "`!antilink on|off|status` — Control anti-link protection",
+          "`!setwelcome #channel <message>` — Set welcome messages",
+          "`!testwelcome` — Preview the welcome message",
+          "`!setleave #channel <message>` — Set leave messages",
+          "`!testleave` — Preview the leave message",
+          "`!setmodlog #channel` — Set moderation logs",
+          "",
+          "**🛡️ Moderation**",
+          "`!kick @user [reason]` — Kick a member",
+          "`!ban @user [reason]` — Ban a member",
+          "`!unban <user-id>` — Unban a user",
+          "`!to @user <minutes> [reason]` — Timeout a member",
+          "`!rto @user` — Remove a timeout",
+          "`!warn @user <reason>` — Warn a member",
+          "`!warnings @user` — View warnings",
+          "`!clearwarnings @user` — Clear warnings",
+          "`!lock` / `!unlock` — Lock or unlock a channel",
+          "`!slowmode <seconds>` — Set slowmode",
+          "`!purge <1-100>` — Delete messages",
+          "",
+          "**🎁 Giveaways**",
+          "`!giveaway <duration> <winners> <prize>` — Start a giveaway",
+          "`!glist [message-id]` — List giveaway entries",
+          "`!gend [message-id]` — End a giveaway",
+        ];
+
+        const pages = [];
+        let page = "";
+        for (const line of helpLines) {
+          if (page.length + line.length + 1 > 1900) {
+            pages.push(page);
+            page = "";
+          }
+          page += `${line}\n`;
+        }
+        if (page) pages.push(page);
+        await message.reply({ content: pages.shift(), allowedMentions: { parse: [] } });
+        for (const nextPage of pages) {
+          await message.channel.send({ content: nextPage, allowedMentions: { parse: [] } });
         }
         break;
       }
