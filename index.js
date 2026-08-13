@@ -209,6 +209,69 @@ function parseButtonEmoji(value) {
   return value || "✅";
 }
 
+async function configureVerification(message, args) {
+  const roleMention = message.mentions.roles.first();
+  const emoji = roleMention
+    ? (args.find(value => value !== roleMention.toString()) || "✅")
+    : (args.length > 1 ? args[args.length - 1] : "✅");
+  const roleQuery = roleMention
+    ? roleMention.id
+    : (args.length > 1 ? args.slice(0, -1).join(" ") : args[0]);
+  const verifiedRole = roleMention || resolveRole(message.guild, roleQuery);
+
+  if (!verifiedRole) {
+    await message.reply("Please choose a role first. Example: `!verification setup @Verified ✅`");
+    return;
+  }
+  if (!verifiedRole.editable) {
+    await message.reply(`I can't manage **${verifiedRole.name}** yet. Move it below my bot's highest role, then try again.`);
+    return;
+  }
+  setConfig(message.guild.id, {
+    verifiedRole: verifiedRole.id,
+    verifiedEmoji: emoji,
+  });
+  await message.reply({
+    content: `✅ **Verification is ready.** Members will receive **${verifiedRole.name}** when they click the ${emoji} button.`,
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function postVerificationPanel(message) {
+  const cfg = getConfig(message.guild.id);
+  const verifiedRole = cfg.verifiedRole ? message.guild.roles.cache.get(cfg.verifiedRole) : null;
+  if (!verifiedRole) {
+    await message.reply("Verification is not configured. Run `!verification setup @Verified ✅` first.");
+    return;
+  }
+  const verifyButton = new ButtonBuilder()
+    .setCustomId(VERIFY_BTN)
+    .setLabel("Click to Verify")
+    .setEmoji(parseButtonEmoji(cfg.verifiedEmoji || "✅"))
+    .setStyle(ButtonStyle.Primary);
+  const row = new ActionRowBuilder().addComponents(verifyButton);
+  const embed = new EmbedBuilder()
+    .setTitle("🔷 Server Verification")
+    .setDescription(
+      "Welcome to the server.\n\n" +
+      "Before you can view the rest of the community, please confirm that you have read and agree to follow the server rules.\n\n" +
+      "Click the button below to complete verification and unlock your member access."
+    )
+    .addFields({
+      name: "What happens next?",
+      value: `You will receive **${verifiedRole.name}** immediately after clicking the button.`,
+    })
+    .setColor(0x2563eb)
+    .setFooter({ text: "If the button does not work, please contact a staff member." })
+    .setTimestamp();
+  await message.channel.send({
+    embeds: [embed],
+    components: [row],
+    allowedMentions: { parse: [] },
+  });
+  if (message.deletable) await message.delete().catch(() => {});
+}
+
 // ─── Giveaways ─────────────────────────────────────────────────────────────
 async function endGiveaway(client, messageId) {
   const g = giveaways.get(messageId);
@@ -964,7 +1027,12 @@ client.on("messageCreate", async message => {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
 
         const rest = message.content.slice(PREFIX.length + "role".length).trim();
-        const usage = "Usage: `!role <@user> <role>` or `!role <user> | <role>`\nExample: `!role @Sam Moderator` or `!role Sam | Moderator` — adds it if Sam doesn't have it, removes it if he does. No ping needed for the user — a name or ID works too.";
+        const usage = [
+          "**Role Toggle**",
+          "Use `!role @user <role>` to switch a role on or off.",
+          "Example: `!role @Sam Moderator`",
+          "You can also use `!role Sam | Moderator` without mentioning the member.",
+        ].join("\n");
         if (!rest) return void message.reply(usage);
 
         let userPart, rolePart;
@@ -980,32 +1048,32 @@ client.on("messageCreate", async message => {
         } else {
           // No mention and no "|" — mark the split point with a bare role ID instead.
           const roleAnchorMatch = rest.match(/\b\d{17,19}\b/);
-          if (!roleAnchorMatch) return void message.reply(`Please mention the user, or separate the user and role with \`|\`.\n\n${usage}`);
+          if (!roleAnchorMatch) return void message.reply(`I couldn't tell which member and role you meant.\n\n${usage}`);
           rolePart = roleAnchorMatch[0];
           userPart = rest.slice(0, roleAnchorMatch.index).trim();
         }
         if (!userPart || !rolePart) return void message.reply(usage);
 
         const member = await resolveMember(message.guild, userPart);
-        if (!member) return void message.reply(`Couldn't find a member matching \`${userPart}\`.`);
+        if (!member) return void message.reply(`I couldn't find a member named **${userPart}**. Check the spelling and try again.`);
 
         const role = resolveRole(message.guild, rolePart);
-        if (!role) return void message.reply(`Couldn't find a role matching \`${rolePart}\`.`);
-        if (!role.editable) return void message.reply(`I can't manage **${role.name}** — it's above my highest role, or I'm missing the **Manage Roles** permission.`);
+        if (!role) return void message.reply(`I couldn't find a role named **${rolePart}**. Check the spelling and try again.`);
+        if (!role.editable) return void message.reply(`I can't manage **${role.name}** yet. Move it below my bot's highest role.`);
 
         const hasRole = member.roles.cache.has(role.id);
         if (hasRole) {
           await member.roles.remove(role);
-          await message.reply({ content: `✅ Removed **${role.name}** from **${member.user.tag}**`, allowedMentions: { parse: [] } });
+          await message.reply({ content: `✅ Role updated — **${member.user.tag}** no longer has **${role.name}**.`, allowedMentions: { parse: [] } });
         } else {
           await member.roles.add(role);
-          await message.reply({ content: `✅ Added **${role.name}** to **${member.user.tag}**`, allowedMentions: { parse: [] } });
+          await message.reply({ content: `✅ Role updated — **${member.user.tag}** now has **${role.name}**.`, allowedMentions: { parse: [] } });
         }
         break;
       }
       case "verified": case "verify": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        if (!targetMember) return void message.reply("Usage: `!verified @user`");
+        if (!targetMember) return void message.reply("Usage: `!verified @user` — manually assign the configured Verification role.");
 
         const cfg = getConfig(message.guild.id);
         let verifiedRole = cfg.verifiedRole
@@ -1020,65 +1088,36 @@ client.on("messageCreate", async message => {
           setConfig(message.guild.id, { verifiedRole: verifiedRole.id });
         }
         if (!verifiedRole.editable) {
-          return void message.reply("I can't manage the **Verified** role. Move it below my bot's highest role.");
+          return void message.reply("I can't manage the **Verified** role yet. Move it below my bot's highest role.");
         }
         if (targetMember.roles.cache.has(verifiedRole.id)) {
-          return void message.reply(`✅ **${targetUser.tag}** is already verified.`);
+          return void message.reply(`✅ **${targetUser.tag}** already has the **${verifiedRole.name}** role.`);
         }
         await targetMember.roles.add(verifiedRole, `Verified by ${message.author.tag}`);
-        await message.reply(`✅ **${targetUser.tag}** is now verified.`);
+        await message.reply(`✅ Verification complete — **${targetUser.tag}** now has **${verifiedRole.name}**.`);
+        break;
+      }
+      case "verification": {
+        const action = args[0]?.toLowerCase();
+        if (action === "setup") {
+          if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
+          await configureVerification(message, args.slice(1));
+        } else if (action === "panel" || !action) {
+          if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
+          await postVerificationPanel(message);
+        } else {
+          await message.reply("Use `!verification setup @role ✅` to configure it, or `!verification panel` to post the panel.");
+        }
         break;
       }
       case "verifysetup": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        const roleMention = message.mentions.roles.first();
-        const emoji = roleMention
-          ? (args.find(value => value !== roleMention.toString()) || "✅")
-          : (args.length > 1 ? args[args.length - 1] : "✅");
-        const roleQuery = roleMention
-          ? roleMention.id
-          : (args.length > 1 ? args.slice(0, -1).join(" ") : args[0]);
-        const verifiedRole = roleMention || resolveRole(message.guild, roleQuery);
-        if (!verifiedRole) {
-          return void message.reply("Usage: `!verifysetup @Verified ✅` or `!verifysetup Verified ✅`");
-        }
-        if (!verifiedRole.editable) {
-          return void message.reply("I can't manage that role. Move it below my bot's highest role.");
-        }
-        setConfig(message.guild.id, {
-          verifiedRole: verifiedRole.id,
-          verifiedEmoji: emoji,
-        });
-        await message.reply({
-          content: `✅ Verification is configured with **${verifiedRole.name}** and the ${emoji} button.`,
-          allowedMentions: { parse: [] },
-        });
+        await configureVerification(message, args);
         break;
       }
       case "verifypanel": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        const cfg = getConfig(message.guild.id);
-        const verifiedRole = cfg.verifiedRole ? message.guild.roles.cache.get(cfg.verifiedRole) : null;
-        if (!verifiedRole) {
-          return void message.reply("Run `!verifysetup @Verified ✅` first.");
-        }
-        const verifyButton = new ButtonBuilder()
-          .setCustomId(VERIFY_BTN)
-          .setLabel("Verify")
-          .setEmoji(parseButtonEmoji(cfg.verifiedEmoji || "✅"))
-          .setStyle(ButtonStyle.Primary);
-        const row = new ActionRowBuilder().addComponents(verifyButton);
-        const embed = new EmbedBuilder()
-          .setTitle("✅ Verification")
-          .setDescription("Click the button below to get verified and receive access to the server.")
-          .setColor(0x3498db)
-          .setFooter({ text: `Click to receive: ${verifiedRole.name}` });
-        await message.channel.send({
-          embeds: [embed],
-          components: [row],
-          allowedMentions: { parse: [] },
-        });
-        if (message.deletable) await message.delete().catch(() => {});
+        await postVerificationPanel(message);
         break;
       }
       case "antilink": case "anti-link": {
@@ -1086,10 +1125,10 @@ client.on("messageCreate", async message => {
         const setting = args[0]?.toLowerCase();
         if (setting === "role") {
           const role = message.mentions.roles.first() || resolveRole(message.guild, args.slice(1).join(" "));
-          if (!role) return void message.reply("Usage: `!antilink role @Staff`");
+          if (!role) return void message.reply("Choose the trusted role first. Example: `!antilink role @Staff`");
           setConfig(message.guild.id, { antiLinkRole: role.id });
           return void message.reply({
-            content: `✅ **${role.name}** can now send links while anti-link is on.`,
+            content: `✅ Link permission updated — members with **${role.name}** can send links while protection is enabled.`,
             allowedMentions: { parse: [] },
           });
         }
@@ -1099,14 +1138,14 @@ client.on("messageCreate", async message => {
         if (setting === "status") {
           const cfg = getConfig(message.guild.id);
           const role = cfg.antiLinkRole ? message.guild.roles.cache.get(cfg.antiLinkRole) : null;
-          return void message.reply(`🔗 Anti-link is **${cfg.antiLink ? "ON" : "OFF"}**. Allowed role: **${role?.name || "none"}**.`);
+          return void message.reply(`🔗 Link protection is **${cfg.antiLink ? "ON" : "OFF"}**. Trusted role: **${role?.name || "not set"}**.`);
         }
         const allowedRole = message.mentions.roles.first() || (setting === "on" ? resolveRole(message.guild, args.slice(1).join(" ")) : null);
         setConfig(message.guild.id, {
           antiLink: setting === "on",
           ...(allowedRole ? { antiLinkRole: allowedRole.id } : {}),
         });
-        await message.reply(`✅ Anti-link protection is now **${setting.toUpperCase()}**.`);
+        await message.reply(`✅ Link protection is now **${setting === "on" ? "enabled" : "disabled"}**.`);
         break;
       }
       case "setwelcome": {
@@ -1486,12 +1525,12 @@ client.on("messageCreate", async message => {
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
           "`!announce #channel <title> | <message>` — Send an announcement",
-          "`!role @user <role>` — Toggle a role",
-          "`!verified @user` — Manually give the configured Verified role",
-          "`!verifysetup @role ✅` — Choose the verification role and button emoji",
-          "`!verifypanel` — Post a clickable verification panel",
-          "`!antilink on|off|status` — Control anti-link protection",
-          "`!antilink role @role` — Allow a role to send links",
+          "`!role @user <role>` — Polished role toggle: add or remove automatically",
+          "`!verification setup @role ✅` — Choose the verification role and button emoji",
+          "`!verification panel` — Post the clickable Verification panel",
+          "`!verified @user` — Manually assign the configured Verification role",
+          "`!antilink on|off|status` — Control link protection",
+          "`!antilink role @role` — Choose the trusted role that may send links",
           "`!setwelcome #channel <message>` — Set welcome messages",
           "`!testwelcome` — Preview the welcome message",
           "`!setleave #channel <message>` — Set leave messages",
