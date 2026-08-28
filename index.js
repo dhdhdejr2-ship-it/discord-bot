@@ -98,6 +98,7 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use !givemoney
+const OWNER_REQUEST_PATTERN = /\b(?:i\s+)?(?:need|want|require)\b.*\bowner\b|\b(?:talk|speak)\s+to\s+(?:the\s+)?owner\b/i;
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
 const TICKET_CLOSE   = "ticket_close";
@@ -476,6 +477,39 @@ client.on("messageCreate", async message => {
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
+const ticketAssistantSeen = new Set();
+const ticketOwnerPinged = new Set();
+
+// ─── Ticket assistant: natural-language owner escalation ────────────────────
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild || !isTicketChannel(message.channel)) return;
+  const text = message.content.trim();
+  if (!text || text.startsWith(PREFIX)) return;
+
+  if (OWNER_REQUEST_PATTERN.test(text)) {
+    if (ticketOwnerPinged.has(message.channel.id)) {
+      return void message.reply({ content: "✅ The owner has already been notified about this ticket.", allowedMentions: { parse: [] } }).catch(() => {});
+    }
+    ticketOwnerPinged.add(message.channel.id);
+    await message.channel.send({
+      content: `🚨 <@${OWNER_ID}> — ${message.author} says they need the owner in this ticket.\n**Message:** ${text}`,
+      allowedMentions: { users: [OWNER_ID] },
+    }).catch(() => {});
+    await message.reply({ content: "✅ I’ve notified the owner. Please wait here and they’ll join when available.", allowedMentions: { parse: [] } }).catch(() => {});
+    return;
+  }
+
+  if (!ticketAssistantSeen.has(message.channel.id)) {
+    ticketAssistantSeen.add(message.channel.id);
+    await message.reply({ content: "Thanks for the details — I’ve recorded your message for the support team. If you want the owner directly, just say **\"I need owner\"**.", allowedMentions: { parse: [] } }).catch(() => {});
+    return;
+  }
+
+  if (/^(hi|hello|hey|yo)\b/i.test(text)) {
+    await message.reply({ content: "Hi! Tell me what you need help with and the support team will take it from there.", allowedMentions: { parse: [] } }).catch(() => {});
+  }
+});
+
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
   // ── Giveaway button ──
@@ -617,7 +651,7 @@ client.on("interactionCreate", async interaction => {
 
       const embed = new EmbedBuilder()
         .setTitle(`${cat.label} Ticket`)
-        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nDescribe your issue or request below. If you need the owner specifically, use **!owner [reason]**.`)
+        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nI’m your ticket assistant. Tell me what you need, and if you need the owner, just say **"I need owner"**.`)
         .setColor(cat.color)
         .setFooter({ text: "662 Support • Click Close Ticket when done" })
         .setTimestamp();
@@ -1544,7 +1578,7 @@ client.on("messageCreate", async message => {
           "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
           "`!ticketpanel` — Post the ticket dropdown",
           "`!settranscript #channel` — Set transcript channel",
-          "`!owner [reason]` — Notify the owner from inside a ticket",
+          "Use the words \"I need owner\" in a ticket — Notify the owner",
           "",
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
