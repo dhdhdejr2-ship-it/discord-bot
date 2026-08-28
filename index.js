@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, AttachmentBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const express = require("express");
 const cors = require("cors");
 
@@ -477,10 +478,76 @@ client.on("messageCreate", async message => {
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
-const ticketAssistantSeen = new Set();
 const ticketOwnerPinged = new Set();
+const ticketConversations = new Map();
+const ticketReplyQueues = new Map();
 
-// ─── Ticket assistant: natural-language owner escalation ────────────────────
+const TICKET_ASSISTANT_SYSTEM_PROMPT = [
+  "You are the first-line support assistant inside a Discord support ticket.",
+  "Respond naturally, warmly, and concisely, usually in 2 to 5 sentences.",
+  "Ask one clear follow-up question when you need more information.",
+  "Do not pretend to be human or claim that staff completed an action.",
+  "Staff and the owner make final decisions about access, payments, moderation, and account changes.",
+  "If the member asks for the owner, the bot application handles that separately."
+].join(" ");
+
+function callOpenAI(messages) {
+  return new Promise((resolve, reject) => {
+    if (!process.env.OPENAI_API_KEY) return reject(new Error("OPENAI_API_KEY is not configured"));
+    const payload = JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      messages,
+      temperature: 0.4,
+      max_tokens: 500,
+    });
+    const request = https.request({
+      hostname: "api.openai.com",
+      path: "/v1/chat/completions",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+    }, response => {
+      let raw = "";
+      response.setEncoding("utf8");
+      response.on("data", chunk => { raw += chunk; });
+      response.on("end", () => {
+        let data;
+        try { data = JSON.parse(raw); } catch { return reject(new Error("OpenAI returned invalid JSON")); }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return reject(new Error(`OpenAI API ${response.statusCode}: ${data.error?.message || "request failed"}`));
+        }
+        const answer = data.choices?.[0]?.message?.content?.trim();
+        if (!answer) return reject(new Error("OpenAI returned an empty response"));
+        resolve(answer);
+      });
+    });
+    request.setTimeout(30000, () => request.destroy(new Error("OpenAI request timed out")));
+    request.on("error", reject);
+    request.write(payload);
+    request.end();
+  });
+}
+
+async function askTicketAssistant(channelId, text) {
+  const current = ticketConversations.get(channelId) || [{ role: "system", content: TICKET_ASSISTANT_SYSTEM_PROMPT }];
+  const messages = [...current, { role: "user", content: text }];
+  const answer = await callOpenAI(messages);
+  const next = [...messages, { role: "assistant", content: answer }];
+  ticketConversations.set(channelId, [next[0], ...next.slice(-12)]);
+  return answer;
+}
+
+function queueTicketReply(channelId, task) {
+  const previous = ticketReplyQueues.get(channelId) || Promise.resolve();
+  const next = previous.then(task, task).catch(error => console.error("Ticket AI queue error:", error.message));
+  ticketReplyQueues.set(channelId, next);
+  next.finally(() => { if (ticketReplyQueues.get(channelId) === next) ticketReplyQueues.delete(channelId); }).catch(() => {});
+}
+
+// ─── Ticket assistant: OpenAI conversation and owner escalation ─────────────
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild || !isTicketChannel(message.channel)) return;
   const text = message.content.trim();
@@ -499,15 +566,16 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  if (!ticketAssistantSeen.has(message.channel.id)) {
-    ticketAssistantSeen.add(message.channel.id);
-    await message.reply({ content: "Thanks for the details — I’ve recorded your message for the support team. If you want the owner directly, just say **\"I need owner\"**.", allowedMentions: { parse: [] } }).catch(() => {});
-    return;
-  }
-
-  if (/^(hi|hello|hey|yo)\b/i.test(text)) {
-    await message.reply({ content: "Hi! Tell me what you need help with and the support team will take it from there.", allowedMentions: { parse: [] } }).catch(() => {});
-  }
+  queueTicketReply(message.channel.id, async () => {
+    await message.channel.sendTyping().catch(() => {});
+    try {
+      const reply = await askTicketAssistant(message.channel.id, text);
+      await message.reply({ content: reply.length > 1900 ? reply.slice(0, 1897) + "..." : reply, allowedMentions: { parse: [] } });
+    } catch (error) {
+      console.error("Ticket AI error:", error.message);
+      await message.reply({ content: `I’m having trouble connecting right now. A staff member will help soon. If you need the owner, say **"I need owner"**.`, allowedMentions: { parse: [] } }).catch(() => {});
+    }
+  });
 });
 
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
@@ -1578,7 +1646,7 @@ client.on("messageCreate", async message => {
           "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
           "`!ticketpanel` — Post the ticket dropdown",
           "`!settranscript #channel` — Set transcript channel",
-          "Use the words \"I need owner\" in a ticket — Notify the owner",
+          "Say \"I need owner\" in a ticket — The assistant will notify the owner",
           "",
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
