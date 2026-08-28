@@ -112,6 +112,14 @@ const TICKET_CATEGORIES = {
   support: { label: "🎫 Support",     description: "Questions, help & general support", color: 0xe91e8c },
 };
 
+function isTicketChannel(channel) {
+  if (!channel?.guild) return false;
+  const cfg = getConfig(channel.guild.id);
+  const configuredCategory = cfg.ticketCategory || process.env.TICKET_CATEGORY_ID;
+  if (configuredCategory && channel.parentId === configuredCategory) return true;
+  return /^(access|allies|support)-/.test(channel.name || "");
+}
+
 const startTime = Date.now();
 
 // ─── In-memory state ───────────────────────────────────────────────────────
@@ -598,6 +606,7 @@ client.on("interactionCreate", async interaction => {
           { id: guild.roles.everyone, deny: ["ViewChannel"] },
           { id: user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
           ...(cfg.ticketRole ? [{ id: cfg.ticketRole, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
+          { id: OWNER_ID, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
           { id: client.user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory","ManageChannels"] },
         ],
       });
@@ -608,7 +617,7 @@ client.on("interactionCreate", async interaction => {
 
       const embed = new EmbedBuilder()
         .setTitle(`${cat.label} Ticket`)
-        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nDescribe your issue or request below.`)
+        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nDescribe your issue or request below. If you need the owner specifically, use **!owner [reason]**.`)
         .setColor(cat.color)
         .setFooter({ text: "662 Support • Click Close Ticket when done" })
         .setTimestamp();
@@ -1194,6 +1203,20 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Preview sent!");
         break;
       }
+      case "owner":
+      case "needowner":
+      case "ownerhelp": {
+        if (!isTicketChannel(message.channel)) {
+          return void message.reply({ content: "This command can only be used inside an open ticket.", allowedMentions: { parse: [] } });
+        }
+        const reason = args.join(" ").trim() || "They asked for owner assistance.";
+        await message.channel.send({
+          content: `🚨 <@${OWNER_ID}> — ${message.author} needs owner assistance in this ticket.\n**Reason:** ${reason}`,
+          allowedMentions: { users: [OWNER_ID] },
+        });
+        await message.reply({ content: "✅ The owner has been notified and will join when available.", allowedMentions: { parse: [] } });
+        break;
+      }
       case "ticketsetup": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         const categoryId = args.find(a => /^\d{17,19}$/.test(a));
@@ -1521,6 +1544,7 @@ client.on("messageCreate", async message => {
           "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
           "`!ticketpanel` — Post the ticket dropdown",
           "`!settranscript #channel` — Set transcript channel",
+          "`!owner [reason]` — Notify the owner from inside a ticket",
           "",
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
