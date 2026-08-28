@@ -1521,7 +1521,7 @@ client.on("messageCreate", async message => {
       }
 
       // ── Giveaway ─────────────────────────────────────────────────────────
-      case "giveaway": {
+      case "gw": case "giveaway": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         const [durStr, winStr, ...prizeArr] = args;
         const prize = prizeArr.join(" ");
@@ -1538,7 +1538,7 @@ client.on("messageCreate", async message => {
           .setTimestamp(Date.now() + ms)
           .setFields({ name: "🎟️ Entries — 0", value: "Nobody yet — be the first!", inline: false });
         const giveawayAttachment = giveawayImageAttachment();
-        if (giveawayAttachment) embed.setImage("attachment://giveaway.png");
+        // Attach the banner once; referencing the same file as an embed image makes Discord render it twice.
         const gMsg = await message.channel.send({ embeds: [embed], components: [row], files: giveawayAttachment ? [giveawayAttachment] : [] });
         giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
         scheduleGiveaway(client, gMsg.id, ms);
