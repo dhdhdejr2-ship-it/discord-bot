@@ -46,7 +46,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const role = message.mentions.roles.first();
-  const icon = args[0];
+  const icon = args.find((argument) => !/^<@&\d+>$/.test(argument));
 
   if (!role || !icon) {
     await message.reply("Usage: `!roleicon @Role :emoji:`");
