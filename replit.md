@@ -1,44 +1,46 @@
-# [Project name]
+# Discord Role Icon Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An administrator-only Discord bot command for setting server role icons from Unicode or custom emojis.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/discord-bot run start` — start the Discord bot
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required secret: `DISCORD_TOKEN`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- pnpm workspaces, Node.js 24, JavaScript
+- Discord.js 14
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `discord-bot/index.js` — bot client and command handler
+- `discord-bot/README.md` — Discord setup and command usage
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The bot uses a prefix command so it works without registering slash-command metadata.
+- Custom emoji images are converted to PNG before being sent as role-icon data.
+- The token is read only from `DISCORD_TOKEN`; it is never stored in source files.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Administrators can run `!roleicon @Role :emoji:` to set a role's icon. The bot
+checks permissions, role hierarchy, managed-role restrictions, and Discord API
+errors before confirming the change.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+The user asked for a new bot project containing the role-icon command.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Discord's Message Content Intent must be enabled for prefix commands to work.
+- The bot role must be above the target role.
 
 ## Pointers
 
