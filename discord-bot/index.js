@@ -21,8 +21,19 @@ const client = new Client({
   ],
 });
 
+const snipedMessages = new Map();
+
 client.once("clientReady", () => {
   console.log(`Logged in as ${client.user.tag}`);
+});
+
+client.on("messageDelete", (message) => {
+  if (message.author?.bot || !message.content) return;
+  snipedMessages.set(message.channelId, {
+    author: message.author.tag,
+    content: message.content,
+    timestamp: Date.now(),
+  });
 });
 
 client.on("messageCreate", async (message) => {
@@ -31,6 +42,21 @@ client.on("messageCreate", async (message) => {
 
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const command = args.shift()?.toLowerCase();
+
+  if (command === "s" || command === "snipe") {
+    const deleted = snipedMessages.get(message.channel.id);
+    if (!deleted) {
+      await message.reply(
+        "Nothing to show—there is no recently deleted message in this channel.",
+      );
+      return;
+    }
+
+    await message.reply(
+      `🗑️ **${deleted.author}** deleted:\n${deleted.content}`,
+    );
+    return;
+  }
 
   if (command !== "roleicon") return;
 

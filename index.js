@@ -915,7 +915,7 @@ client.on("messageCreate", async message => {
         await message.reply(`✅ Got it! I'll remind you about **${reminderText}** in **${timeStr}**.`);
         break;
       }
-      case "snipe": {
+      case "s": case "snipe": {
         const data = sniped.get(message.channel.id);
         if (!data) return void message.reply("Nothing to snipe! No recently deleted messages in this channel.");
         const embed = new EmbedBuilder()
@@ -1673,7 +1673,7 @@ client.on("messageCreate", async message => {
           "`!poll Question? | Option 1 | Option 2` — Create a poll",
           "`!math <expression>` — Calculate an expression",
           "`!remind <time> <message>` — Set a reminder",
-          "`!snipe` — Show the latest deleted message",
+          "`!s` / `!snipe` — Show the latest deleted message",
           "`!afk [reason]` — Set your AFK status",
           "`!help` — Show this command list",
           "",

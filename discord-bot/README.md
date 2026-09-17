@@ -7,10 +7,14 @@ role's icon.
 
 ```text
 !roleicon @Role :emoji:
+!s
 ```
 
 The emoji can be a Unicode emoji such as `⭐` or a custom Discord emoji such as
 `<:star:123456789012345678>`.
+
+`!s` shows the most recently deleted message from the current channel. `!snipe`
+also works as the longer alias.
 
 ## Required Discord setup
 
