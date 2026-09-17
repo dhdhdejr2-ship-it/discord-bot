@@ -1744,20 +1744,10 @@ client.on("messageCreate", async message => {
           "`!gend [message-id]` — End a giveaway",
         ];
 
-        const pages = [];
-        let page = "";
-        for (const line of helpLines) {
-          if (page.length + line.length + 1 > 1900) {
-            pages.push(page);
-            page = "";
-          }
-          page += `${line}\n`;
-        }
-        if (page) pages.push(page);
-        await message.reply({ content: pages.shift(), allowedMentions: { parse: [] } });
-        for (const nextPage of pages) {
-          await message.channel.send({ content: nextPage, allowedMentions: { parse: [] } });
-        }
+        const helpEmbed = new EmbedBuilder()
+          .setDescription(helpLines.join("\n"))
+          .setColor(0x5865f2);
+        await message.reply({ embeds: [helpEmbed], allowedMentions: { parse: [] } });
         break;
       }
 
