@@ -38,7 +38,6 @@ packages:
   - artifacts/*
   - lib/*
   - lib/integrations/*
-  - discord-bot
   - scripts
 
 catalog:

@@ -4,7 +4,7 @@ An administrator-only Discord bot command for setting server role icons from Uni
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/discord-bot run start` — start the Discord bot
+- `pnpm start` — start the Discord bot
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -18,8 +18,7 @@ An administrator-only Discord bot command for setting server role icons from Uni
 
 ## Where things live
 
-- `discord-bot/index.js` — bot client and command handler
-- `discord-bot/README.md` — Discord setup and command usage
+- `index.js` — bot client and command handler
 
 ## Architecture decisions
 
