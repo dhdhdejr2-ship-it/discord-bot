@@ -123,6 +123,8 @@ function isTicketChannel(channel) {
 }
 
 const startTime = Date.now();
+const IDLE_PRESENCE_MS = 5 * 60 * 1000;
+let idlePresenceTimer = null;
 
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
@@ -378,9 +380,18 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+function markBotActive() {
+  if (!client.user) return;
+  client.user.setPresence({ status: "dnd" });
+  if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
+  idlePresenceTimer = setTimeout(() => {
+    client.user?.setPresence({ status: "invisible" });
+  }, IDLE_PRESENCE_MS);
+}
+
 client.once("clientReady", c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
-  c.user.setPresence({ status: "dnd" });
+  markBotActive();
   resumeGiveaways(client);
   resumeReminders(client);
 });
@@ -745,6 +756,7 @@ client.on("messageCreate", async message => {
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const cmd = args.shift()?.toLowerCase();
   if (!cmd) return;
+  markBotActive();
 
   let targetUser = message.mentions.users.first() || null;
   let targetMember = targetUser ? await message.guild.members.fetch(targetUser.id).catch(()=>null) : null;

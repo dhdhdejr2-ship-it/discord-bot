@@ -16,6 +16,10 @@ The emoji can be a Unicode emoji such as `⭐` or a custom Discord emoji such as
 `!s` shows the most recently deleted message from the current channel. `!snipe`
 also works as the longer alias.
 
+The bot stays **Do Not Disturb** while active. After five minutes without a
+command, it switches to **Invisible** and returns to **Do Not Disturb** when
+someone uses any `!` command.
+
 ## Required Discord setup
 
 1. Add the bot to the server with the `Manage Roles` permission.

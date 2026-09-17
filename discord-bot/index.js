@@ -6,6 +6,7 @@ const {
 
 const token = process.env.DISCORD_TOKEN;
 const PREFIX = "!";
+const IDLE_PRESENCE_MS = 5 * 60 * 1000;
 
 if (!token) {
   throw new Error(
@@ -22,9 +23,20 @@ const client = new Client({
 });
 
 const snipedMessages = new Map();
+let idlePresenceTimer = null;
+
+function markBotActive() {
+  if (!client.user) return;
+  client.user.setPresence({ status: "dnd" });
+  if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
+  idlePresenceTimer = setTimeout(() => {
+    client.user?.setPresence({ status: "invisible" });
+  }, IDLE_PRESENCE_MS);
+}
 
 client.once("clientReady", () => {
   console.log(`Logged in as ${client.user.tag}`);
+  markBotActive();
 });
 
 client.on("messageDelete", (message) => {
@@ -42,6 +54,8 @@ client.on("messageCreate", async (message) => {
 
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const command = args.shift()?.toLowerCase();
+  if (!command) return;
+  markBotActive();
 
   if (command === "s" || command === "snipe") {
     const deleted = snipedMessages.get(message.channel.id);
