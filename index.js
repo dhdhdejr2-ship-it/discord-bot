@@ -346,26 +346,17 @@ function resumeReminders(client) {
   }
 }
 
-// ─── Welcome banner image ──────────────────────────────────────────────────
-const WELCOME_IMAGE_PATH = path.join(__dirname, "assets", "welcome.png");
-function welcomeImageAttachment() {
-  if (!fs.existsSync(WELCOME_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(WELCOME_IMAGE_PATH, { name: "welcome.png" });
+// ─── Shared bot image ───────────────────────────────────────────────────────
+// All static bot panels use the uploaded GIF below.
+const BOT_IMAGE_PATH = path.join(__dirname, "assets", "bot.gif");
+function botImageAttachment() {
+  if (!fs.existsSync(BOT_IMAGE_PATH)) return null;
+  return new AttachmentBuilder(BOT_IMAGE_PATH, { name: "bot.gif" });
 }
 
-// ─── Leave banner image ─────────────────────────────────────────────────────
-const LEAVE_IMAGE_PATH = path.join(__dirname, "assets", "leave.png");
-function leaveImageAttachment() {
-  if (!fs.existsSync(LEAVE_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(LEAVE_IMAGE_PATH, { name: "leave.png" });
-}
-
-// ─── Giveaway banner image ─────────────────────────────────────────────────
-const GIVEAWAY_IMAGE_PATH = path.join(__dirname, "assets", "giveaway.png");
-function giveawayImageAttachment() {
-  if (!fs.existsSync(GIVEAWAY_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(GIVEAWAY_IMAGE_PATH, { name: "giveaway.png" });
-}
+function welcomeImageAttachment() { return botImageAttachment(); }
+function leaveImageAttachment() { return botImageAttachment(); }
+function giveawayImageAttachment() { return botImageAttachment(); }
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
     if (g.ended || g.ending) continue;
@@ -439,7 +430,7 @@ client.on("guildMemberAdd", async member => {
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = welcomeImageAttachment();
     const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://welcome.png");
+    if (attachment) embed.setImage("attachment://bot.gif");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Welcome error:", e); }
 });
@@ -461,7 +452,7 @@ client.on("guildMemberRemove", async member => {
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = leaveImageAttachment();
     const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://leave.png");
+    if (attachment) embed.setImage("attachment://bot.gif");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Leave error:", e); }
 });
@@ -1384,7 +1375,7 @@ client.on("messageCreate", async message => {
         const ch = await client.channels.fetch(chId);
         const previewAttachment = welcomeImageAttachment();
         const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://welcome.png");
+        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
         await message.reply("✅ Preview sent!");
         break;
@@ -1407,7 +1398,7 @@ client.on("messageCreate", async message => {
         const ch = await client.channels.fetch(chId);
         const previewAttachment = leaveImageAttachment();
         const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://leave.png");
+        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
         await message.reply("✅ Preview sent!");
         break;
@@ -1443,7 +1434,7 @@ client.on("messageCreate", async message => {
       case "ticketpanel": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
 
-        const imagePath = path.join(__dirname, "assets", "ltd.png");
+        const imagePath = BOT_IMAGE_PATH;
         const hasImage = fs.existsSync(imagePath);
 
         const selectMenu = new StringSelectMenuBuilder()
@@ -1491,8 +1482,8 @@ client.on("messageCreate", async message => {
           .setTimestamp();
 
         if (hasImage) {
-          const attachment = new AttachmentBuilder(imagePath, { name: "662.png" });
-          embed.setImage("attachment://662.png");
+          const attachment = new AttachmentBuilder(imagePath, { name: "bot.gif" });
+          embed.setImage("attachment://bot.gif");
           await message.channel.send({ embeds: [embed], files: [attachment], components: [row] });
         } else {
           await message.channel.send({ embeds: [embed], components: [row] });
