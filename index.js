@@ -98,7 +98,8 @@ const economy = {
 function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
-const OWNER_ID = "1449567336012054575"; // only this user can use !givemoney
+const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
+const ALLOWED_GUILD_ID = "1546675179093102694"; // the only server where the bot may stay
 const OWNER_REQUEST_PATTERN = /\b(?:i\s+)?(?:need|want|require)\b.*\bowner\b|\b(?:talk|speak)\s+to\s+(?:the\s+)?owner\b/i;
 const GIVEAWAY_BTN   = "giveaway_enter";
 const TICKET_SELECT  = "ticket_category";
@@ -389,11 +390,36 @@ function markBotActive() {
   }, IDLE_PRESENCE_MS);
 }
 
-client.once("clientReady", c => {
+async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
+  if (guild.id === ALLOWED_GUILD_ID) return false;
+
+  console.log(`🚪 Leaving unauthorized server ${guild.name} (${guild.id}) — ${reason}`);
+  try {
+    await guild.leave();
+    return true;
+  } catch (error) {
+    console.error(`❌ Could not leave ${guild.name} (${guild.id}):`, error);
+    return false;
+  }
+}
+
+async function enforceGuildAllowlist() {
+  for (const guild of client.guilds.cache.values()) {
+    await leaveUnauthorizedGuild(guild, "startup check");
+  }
+}
+
+client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
   markBotActive();
   resumeGiveaways(client);
   resumeReminders(client);
+  await enforceGuildAllowlist();
+});
+
+// If somebody manages to add the bot, leave immediately unless it is the owner server.
+client.on("guildCreate", guild => {
+  void leaveUnauthorizedGuild(guild, "new server");
 });
 
 // ─── Welcome ───────────────────────────────────────────────────────────────
@@ -1145,6 +1171,26 @@ client.on("messageCreate", async message => {
           .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
         break;
       }
+      case "leaveall":
+      case "leave-all": {
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("🚫 This command is locked — only the owner can use it.");
+        }
+        if (message.guild.id !== ALLOWED_GUILD_ID) {
+          return void message.reply("🚫 This command can only be used in the owner server.");
+        }
+
+        const otherGuilds = [...client.guilds.cache.values()]
+          .filter(guild => guild.id !== ALLOWED_GUILD_ID);
+        let leftCount = 0;
+
+        for (const guild of otherGuilds) {
+          if (await leaveUnauthorizedGuild(guild, "!leaveall command")) leftCount++;
+        }
+
+        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the owner server.`);
+        break;
+      }
       case "givemoney": {
         if (message.author.id !== OWNER_ID) return void message.reply("🚫 This command is locked — only the owner can use it.");
         const user = targetUser || message.author;
@@ -1723,6 +1769,7 @@ client.on("messageCreate", async message => {
           "`!testwelcome` — Preview the welcome message",
           "`!setleave #channel <message>` — Set leave messages",
           "`!testleave` — Preview the leave message",
+          "`!leaveall` — Owner only: leave every server except the owner server",
           "`!setmodlog #channel` — Set moderation logs",
           "",
           "**🛡️ Moderation**",
