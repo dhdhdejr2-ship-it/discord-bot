@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, AttachmentBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
@@ -100,27 +100,21 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const ALLOWED_GUILD_ID = "1546675179093102694"; // the only server where the bot may stay
-const OWNER_REQUEST_PATTERN = /\b(?:i\s+)?(?:need|want|require)\b.*\bowner\b|\b(?:talk|speak)\s+to\s+(?:the\s+)?owner\b/i;
+const STAFF_REQUEST_PATTERN = /\b(?:i\s+)?(?:need|want|require|call|contact|ping|talk to|speak to)\b.{0,24}\b(?:staff|human|moderator|support)\b|\b(?:staff|human|moderator|support)\b.{0,24}\b(?:help|please|now|needed)\b/i;
 const GIVEAWAY_BTN   = "giveaway_enter";
-const TICKET_SELECT  = "ticket_category";
+const TICKET_CREATE = "ticket_create";
+const TICKET_STAFF  = "ticket_staff";
 const TICKET_CLOSE   = "ticket_close";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
 
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
-const TICKET_CATEGORIES = {
-  access:  { label: "🔓 Free Access", description: "Join the gang & get turf access",  color: 0xe91e8c },
-  allies:  { label: "🤝 Allies",      description: "Alliance & partnership requests",   color: 0xe91e8c },
-  support: { label: "🎫 Support",     description: "Questions, help & general support", color: 0xe91e8c },
-};
-
 function isTicketChannel(channel) {
-  if (!channel?.guild) return false;
-  const cfg = getConfig(channel.guild.id);
-  const configuredCategory = cfg.ticketCategory || process.env.TICKET_CATEGORY_ID;
-  if (configuredCategory && channel.parentId === configuredCategory) return true;
-  return /^(access|allies|support)-/.test(channel.name || "");
+  return Boolean(
+    channel?.guild &&
+    (/^ticket-/.test(channel.name || "") || channel.topic?.startsWith("ticket:"))
+  );
 }
 
 const startTime = Date.now();
@@ -506,7 +500,7 @@ client.on("messageCreate", async message => {
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
-const ticketOwnerPinged = new Set();
+const ticketStaffPinged = new Set();
 const ticketConversations = new Map();
 const ticketReplyQueues = new Map();
 
@@ -516,7 +510,7 @@ const TICKET_ASSISTANT_SYSTEM_PROMPT = [
   "Ask one clear follow-up question when you need more information.",
   "Do not pretend to be human or claim that staff completed an action.",
   "Staff and the owner make final decisions about access, payments, moderation, and account changes.",
-  "If the member asks for the owner, the bot application handles that separately."
+  "If the member asks for staff, the bot application will notify the configured staff team."
 ].join(" ");
 
 function callOpenAI(messages) {
@@ -575,22 +569,42 @@ function queueTicketReply(channelId, task) {
   next.finally(() => { if (ticketReplyQueues.get(channelId) === next) ticketReplyQueues.delete(channelId); }).catch(() => {});
 }
 
-// ─── Ticket assistant: OpenAI conversation and owner escalation ─────────────
+async function notifyTicketStaff(channel, requester, reason = "The member requested staff assistance.") {
+  const cfg = getConfig(channel.guild.id);
+  const staffRoleId = cfg.ticketRole || process.env.TICKET_ROLE_ID;
+
+  if (!staffRoleId) {
+    await channel.send({
+      content: "⚠️ Staff is not configured yet. An administrator should run `!ticketsetup <category-id> @staff-role`.",
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
+    return "unconfigured";
+  }
+
+  if (ticketStaffPinged.has(channel.id)) return "already";
+  ticketStaffPinged.add(channel.id);
+
+  await channel.send({
+    content: `📢 <@&${staffRoleId}> — ${requester} needs staff assistance.\n**Reason:** ${reason}`,
+    allowedMentions: { roles: [staffRoleId], users: [requester.id] },
+  }).catch(() => {});
+  return "notified";
+}
+
+// ─── Ticket assistant: OpenAI conversation and staff escalation ─────────────
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild || !isTicketChannel(message.channel)) return;
   const text = message.content.trim();
   if (!text || text.startsWith(PREFIX)) return;
 
-  if (OWNER_REQUEST_PATTERN.test(text)) {
-    if (ticketOwnerPinged.has(message.channel.id)) {
-      return void message.reply({ content: "✅ The owner has already been notified about this ticket.", allowedMentions: { parse: [] } }).catch(() => {});
-    }
-    ticketOwnerPinged.add(message.channel.id);
-    await message.channel.send({
-      content: `🚨 <@${OWNER_ID}> — ${message.author} says they need the owner in this ticket.\n**Message:** ${text}`,
-      allowedMentions: { users: [OWNER_ID] },
-    }).catch(() => {});
-    await message.reply({ content: "✅ I’ve notified the owner. Please wait here and they’ll join when available.", allowedMentions: { parse: [] } }).catch(() => {});
+  if (STAFF_REQUEST_PATTERN.test(text)) {
+    const status = await notifyTicketStaff(message.channel, message.author, text);
+    const reply = status === "already"
+      ? "✅ Staff has already been notified for this ticket."
+      : status === "notified"
+        ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
+        : "⚠️ I couldn’t ping staff because the staff role is not configured yet.";
+    await message.reply({ content: reply, allowedMentions: { parse: [] } }).catch(() => {});
     return;
   }
 
@@ -601,7 +615,7 @@ client.on("messageCreate", async message => {
       await message.reply({ content: reply.length > 1900 ? reply.slice(0, 1897) + "..." : reply, allowedMentions: { parse: [] } });
     } catch (error) {
       console.error("Ticket AI error:", error.message);
-      await message.reply({ content: `I’m having trouble connecting right now. A staff member will help soon. If you need the owner, say **"I need owner"**.`, allowedMentions: { parse: [] } }).catch(() => {});
+      await message.reply({ content: `I’m having trouble connecting right now. A staff member will help soon. You can also say **"I need staff"**.`, allowedMentions: { parse: [] } }).catch(() => {});
     }
   });
 });
@@ -712,51 +726,73 @@ client.on("interactionCreate", async interaction => {
       return;
     }
 
-  // ── Ticket category select menu ──
-  if (interaction.isStringSelectMenu() && interaction.customId === TICKET_SELECT) {
-    const category = interaction.values[0]; // "access" | "allies" | "buying"
-    const cat = TICKET_CATEGORIES[category];
+  // ── Ask staff button ──
+  if (interaction.isButton() && interaction.customId === TICKET_STAFF) {
+    if (!isTicketChannel(interaction.channel)) {
+      return interaction.reply({ content: "This button only works inside an open ticket.", ephemeral: true });
+    }
+
+    const status = await notifyTicketStaff(interaction.channel, interaction.user, "The member clicked **Call Staff**.");
+    const reply = status === "already"
+      ? "✅ Staff has already been notified for this ticket."
+      : status === "notified"
+        ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
+        : "⚠️ Staff is not configured yet. Ask an administrator to run `!ticketsetup`.";
+    return interaction.reply({ content: reply, ephemeral: true });
+  }
+
+  // ── Create simple support ticket ──
+  if (interaction.isButton() && interaction.customId === TICKET_CREATE) {
     const { user, guild } = interaction;
     if (!guild) return;
 
-    // Check for existing ticket
     const existing = guild.channels.cache.find(
-      c => c.name === `${category}-${user.username.toLowerCase()}`
+      channel => channel.topic === `ticket:${user.id}` ||
+        channel.name === `ticket-${user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80)}`
     );
     if (existing) {
       return interaction.reply({ content: `You already have an open ticket: ${existing}`, ephemeral: true });
     }
 
     const cfg = getConfig(guild.id);
+    const staffRoleId = cfg.ticketRole || process.env.TICKET_ROLE_ID;
+    const safeName = user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80) || "user";
+
     try {
       const ch = await guild.channels.create({
-        name: `${category}-${user.username.toLowerCase()}`,
+        name: `ticket-${safeName}`,
+        topic: `ticket:${user.id}`,
         parent: cfg.ticketCategory || process.env.TICKET_CATEGORY_ID || undefined,
         permissionOverwrites: [
           { id: guild.roles.everyone, deny: ["ViewChannel"] },
           { id: user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
-          ...(cfg.ticketRole ? [{ id: cfg.ticketRole, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
+          ...(staffRoleId ? [{ id: staffRoleId, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
           { id: OWNER_ID, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
           { id: client.user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory","ManageChannels"] },
         ],
       });
 
-      const closeRow = new ActionRowBuilder().addComponents(
+      const ticketRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(TICKET_STAFF).setLabel("👥 Call Staff").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(TICKET_CLOSE).setLabel("🔒 Close Ticket").setStyle(ButtonStyle.Danger)
       );
 
       const embed = new EmbedBuilder()
-        .setTitle(`${cat.label} Ticket`)
-        .setDescription(`Hey ${user}! Welcome to your **${cat.label.replace(/^[^ ]+ /,"")}** ticket.\nStaff will be with you shortly.\n\nI’m your ticket assistant. Tell me what you need, and if you need the owner, just say **"I need owner"**.`)
-        .setColor(cat.color)
-        .setFooter({ text: "662 Support • Click Close Ticket when done" })
+        .setTitle("🎫 Support Ticket")
+        .setDescription(`Hey ${user}! I’m here to help. Tell me what you need and I’ll do my best to answer.\n\nIf you need a human staff member, say **"I need staff"** or press **Call Staff** below.`)
+        .setColor(0xe91e8c)
+        .setFooter({ text: "662 Support • Staff will be notified when requested" })
         .setTimestamp();
+      const attachment = botImageAttachment();
+      if (attachment) embed.setImage("attachment://bot.gif");
 
-      await ch.send({ content: `${user}`, embeds: [embed], components: [closeRow] });
-      if (cfg.ticketRole) {
-        await ch.send({ content: `📢 <@&${cfg.ticketRole}> — New **${cat.label.replace(/^[^ ]+ /, "")} ** ticket opened by ${user}. Please assist when available.` });
-      }
-      if (!interaction.replied) await interaction.reply({ content: `✅ Your ticket has been opened: ${ch}`, ephemeral: true });
+      await ch.send({
+        content: `${user}`,
+        embeds: [embed],
+        files: attachment ? [attachment] : [],
+        components: [ticketRow],
+      });
+      if (!interaction.replied) await interaction.reply({ content: `✅ Your support ticket has been opened: ${ch}`, ephemeral: true });
     } catch (e) {
       console.error("Ticket create error:", e);
       if (!interaction.replied && !interaction.deferred) {
@@ -1403,18 +1439,20 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Preview sent!");
         break;
       }
-      case "owner":
-      case "needowner":
-      case "ownerhelp": {
+      case "staff":
+      case "needstaff":
+      case "callstaff": {
         if (!isTicketChannel(message.channel)) {
           return void message.reply({ content: "This command can only be used inside an open ticket.", allowedMentions: { parse: [] } });
         }
-        const reason = args.join(" ").trim() || "They asked for owner assistance.";
-        await message.channel.send({
-          content: `🚨 <@${OWNER_ID}> — ${message.author} needs owner assistance in this ticket.\n**Reason:** ${reason}`,
-          allowedMentions: { users: [OWNER_ID] },
-        });
-        await message.reply({ content: "✅ The owner has been notified and will join when available.", allowedMentions: { parse: [] } });
+        const reason = args.join(" ").trim() || "They requested staff assistance.";
+        const status = await notifyTicketStaff(message.channel, message.author, reason);
+        const reply = status === "already"
+          ? "✅ Staff has already been notified for this ticket."
+          : status === "notified"
+            ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
+            : "⚠️ Staff is not configured yet. Ask an administrator to run `!ticketsetup`.";
+        await message.reply({ content: reply, allowedMentions: { parse: [] } });
         break;
       }
       case "ticketsetup": {
@@ -1437,48 +1475,15 @@ client.on("messageCreate", async message => {
         const imagePath = BOT_IMAGE_PATH;
         const hasImage = fs.existsSync(imagePath);
 
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId(TICKET_SELECT)
-          .setPlaceholder("Select a ticket category...")
-          .addOptions(
-            new StringSelectMenuOptionBuilder()
-              .setLabel("🔓 Free Access")
-              .setDescription("Join the gang & get turf access")
-              .setValue("access"),
-            new StringSelectMenuOptionBuilder()
-              .setLabel("🤝 Allies")
-              .setDescription("Alliance & partnership requests")
-              .setValue("allies"),
-            new StringSelectMenuOptionBuilder()
-              .setLabel("🎫 Support")
-              .setDescription("Questions, help & general support")
-              .setValue("support"),
-          );
-
-        const row = new ActionRowBuilder().addComponents(selectMenu);
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(TICKET_CREATE).setLabel("🎫 Open Support Ticket").setStyle(ButtonStyle.Primary)
+        );
 
         const embed = new EmbedBuilder()
           .setTitle("🎫 Support Ticket")
-          .setDescription(
-            "Welcome to our support panel! We have a couple of different support options so please choose the option that fits your request. " +
-            "Once your ticket is opened our staff team will assist you as soon as possible.\n\u200b"
-          )
-          .addFields(
-            {
-              name: "🔓 Free Access",
-              value: "Please use the free access option if you're looking to join this gang and get access to our future turf.",
-            },
-            {
-              name: "🤝 Allies",
-              value: "Please use the allies option if you want to ally with us.",
-            },
-            {
-              name: "🎫 Support",
-              value: "Please use the support option if you have any questions or need help with something.",
-            },
-          )
+          .setDescription("Need help? Open one private support ticket and tell the bot what you need.\n\nThe bot will talk with you in the ticket. Say **\"I need staff\"** or press **Call Staff** when you want the staff team to join.")
           .setColor(0xe91e8c)
-          .setFooter({ text: "662 Support • Only you and staff can see your ticket" })
+          .setFooter({ text: "662 Support • One ticket per member" })
           .setTimestamp();
 
         if (hasImage) {
@@ -1743,9 +1748,9 @@ client.on("messageCreate", async message => {
           "",
           "**🎫 Tickets**",
           "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
-          "`!ticketpanel` — Post the ticket dropdown",
+          "`!ticketpanel` — Post the support ticket button",
           "`!settranscript #channel` — Set transcript channel",
-          "Say \"I need owner\" in a ticket — The assistant will notify the owner",
+          "Say \"I need staff\" or use `!staff` in a ticket — Ping the staff team",
           "",
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
