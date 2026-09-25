@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 const express = require("express");
 const cors = require("cors");
 
@@ -19,7 +18,7 @@ function saveJSON(file, data) {
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
-// Guild config: { guildId: { welcomeChannel, welcomeMsg, modlogChannel, ticketCategory, ticketRole } }
+// Guild config: { guildId: { welcomeChannel, welcomeMsg, modlogChannel } }
 function getConfig(guildId) {
   const cfg = loadJSON("config.json", {});
   return cfg[guildId] || {};
@@ -100,22 +99,11 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const ALLOWED_GUILD_ID = "1546675179093102694"; // the only server where the bot may stay
-const STAFF_REQUEST_PATTERN = /\b(?:i\s+)?(?:need|want|require|call|contact|ping|talk to|speak to)\b.{0,24}\b(?:staff|human|moderator|support)\b|\b(?:staff|human|moderator|support)\b.{0,24}\b(?:help|please|now|needed)\b/i;
 const GIVEAWAY_BTN   = "giveaway_enter";
-const TICKET_CREATE = "ticket_create";
-const TICKET_STAFF  = "ticket_staff";
-const TICKET_CLOSE   = "ticket_close";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
 
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
-
-function isTicketChannel(channel) {
-  return Boolean(
-    channel?.guild &&
-    (/^ticket-/.test(channel.name || "") || channel.topic?.startsWith("ticket:"))
-  );
-}
 
 const startTime = Date.now();
 const IDLE_PRESENCE_MS = 5 * 60 * 1000;
@@ -500,150 +488,6 @@ client.on("messageCreate", async message => {
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
-const ticketStaffPinged = new Set();
-const ticketConversations = new Map();
-const ticketReplyQueues = new Map();
-
-const TICKET_ASSISTANT_SYSTEM_PROMPT = [
-  "You are the first-line support assistant inside a Discord support ticket.",
-  "Respond naturally, warmly, and concisely, usually in 2 to 5 sentences.",
-  "Ask one clear follow-up question when you need more information.",
-  "Do not pretend to be human or claim that staff completed an action.",
-  "Staff and the owner make final decisions about access, payments, moderation, and account changes.",
-  "If the member asks for staff, the bot application will notify the configured staff team."
-].join(" ");
-
-function localTicketReply(text) {
-  const lower = text.toLowerCase();
-
-  if (/^(hi|hey|hello|yo|hiya)\b/.test(lower)) {
-    return "Hey! I’m here to help. Tell me what you need and I’ll guide you. If you want a human staff member, say **“I need staff”** or press **Call Staff**.";
-  }
-  if (/\b(access|verify|verification|role|join)\b/.test(lower)) {
-    return "I can help with access and verification. Please explain what you are trying to access and what happens when you try it. If it needs a staff decision, say **“I need staff”**.";
-  }
-  if (/\b(alliance|ally|partner|partnership)\b/.test(lower)) {
-    return "Thanks for your partnership request. Tell me who you represent and what kind of alliance you are looking for. I can call the staff team when you are ready.";
-  }
-  if (/\b(payment|pay|price|cost|buy|purchase|money)\b/.test(lower)) {
-    return "I can collect the details, but staff makes final decisions about payments and purchases. Tell me what you are trying to buy or pay for, then say **“I need staff”** if you want them to join.";
-  }
-  if (/\b(bug|error|broken|not work|issue|problem)\b/.test(lower)) {
-    return "Thanks for reporting that. Tell me what you clicked, what you expected, and what happened instead. I’ll pass it to staff if needed.";
-  }
-
-  return "Thanks for explaining that. I’m the first-line support assistant, so I can help gather the details. What result are you trying to get, and what is stopping you? Say **“I need staff”** whenever you want the staff team to join.";
-}
-
-function callOpenAI(messages) {
-  return new Promise((resolve, reject) => {
-    if (!process.env.OPENAI_API_KEY) {
-      return resolve(localTicketReply(messages[messages.length - 1]?.content || ""));
-    }
-    const payload = JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      messages,
-      temperature: 0.4,
-      max_tokens: 500,
-    });
-    const request = https.request({
-      hostname: "api.openai.com",
-      path: "/v1/chat/completions",
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
-      },
-    }, response => {
-      let raw = "";
-      response.setEncoding("utf8");
-      response.on("data", chunk => { raw += chunk; });
-      response.on("end", () => {
-        let data;
-        try { data = JSON.parse(raw); } catch { return reject(new Error("OpenAI returned invalid JSON")); }
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          return reject(new Error(`OpenAI API ${response.statusCode}: ${data.error?.message || "request failed"}`));
-        }
-        const answer = data.choices?.[0]?.message?.content?.trim();
-        if (!answer) return reject(new Error("OpenAI returned an empty response"));
-        resolve(answer);
-      });
-    });
-    request.setTimeout(30000, () => request.destroy(new Error("OpenAI request timed out")));
-    request.on("error", reject);
-    request.write(payload);
-    request.end();
-  });
-}
-
-async function askTicketAssistant(channelId, text) {
-  const current = ticketConversations.get(channelId) || [{ role: "system", content: TICKET_ASSISTANT_SYSTEM_PROMPT }];
-  const messages = [...current, { role: "user", content: text }];
-  const answer = await callOpenAI(messages);
-  const next = [...messages, { role: "assistant", content: answer }];
-  ticketConversations.set(channelId, [next[0], ...next.slice(-12)]);
-  return answer;
-}
-
-function queueTicketReply(channelId, task) {
-  const previous = ticketReplyQueues.get(channelId) || Promise.resolve();
-  const next = previous.then(task, task).catch(error => console.error("Ticket AI queue error:", error.message));
-  ticketReplyQueues.set(channelId, next);
-  next.finally(() => { if (ticketReplyQueues.get(channelId) === next) ticketReplyQueues.delete(channelId); }).catch(() => {});
-}
-
-async function notifyTicketStaff(channel, requester, reason = "The member requested staff assistance.") {
-  const cfg = getConfig(channel.guild.id);
-  const staffRoleId = cfg.ticketRole || process.env.TICKET_ROLE_ID;
-
-  if (!staffRoleId) {
-    await channel.send({
-      content: "⚠️ Staff is not configured yet. An administrator should run `!ticketsetup <category-id> @staff-role`.",
-      allowedMentions: { parse: [] },
-    }).catch(() => {});
-    return "unconfigured";
-  }
-
-  if (ticketStaffPinged.has(channel.id)) return "already";
-  ticketStaffPinged.add(channel.id);
-
-  await channel.send({
-    content: `📢 <@&${staffRoleId}> — ${requester} needs staff assistance.\n**Reason:** ${reason}`,
-    allowedMentions: { roles: [staffRoleId], users: [requester.id] },
-  }).catch(() => {});
-  return "notified";
-}
-
-// ─── Ticket assistant: OpenAI conversation and staff escalation ─────────────
-client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild || !isTicketChannel(message.channel)) return;
-  const text = message.content.trim();
-  if (!text || text.startsWith(PREFIX)) return;
-
-  if (STAFF_REQUEST_PATTERN.test(text)) {
-    const status = await notifyTicketStaff(message.channel, message.author, text);
-    const reply = status === "already"
-      ? "✅ Staff has already been notified for this ticket."
-      : status === "notified"
-        ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
-        : "⚠️ I couldn’t ping staff because the staff role is not configured yet.";
-    await message.reply({ content: reply, allowedMentions: { parse: [] } }).catch(() => {});
-    return;
-  }
-
-  queueTicketReply(message.channel.id, async () => {
-    await message.channel.sendTyping().catch(() => {});
-    try {
-      const reply = await askTicketAssistant(message.channel.id, text);
-      await message.reply({ content: reply.length > 1900 ? reply.slice(0, 1897) + "..." : reply, allowedMentions: { parse: [] } });
-    } catch (error) {
-      console.error("Ticket AI error:", error.message);
-      await message.reply({ content: `I’m having trouble connecting right now. A staff member will help soon. You can also say **"I need staff"**.`, allowedMentions: { parse: [] } }).catch(() => {});
-    }
-  });
-});
-
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
   // ── Giveaway button ──
@@ -705,126 +549,6 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ content: `✅ You are verified and received **${verifiedRole.name}**.`, ephemeral: true });
   }
 
-  // ── Ticket close button ──
-    if (interaction.isButton() && interaction.customId === TICKET_CLOSE) {
-      console.log("[CLOSE] clicked by", interaction.user.username, "perms:", interaction.member?.permissions.toArray().join(","));
-
-      if (!interaction.member?.permissions.has(PermissionFlagsBits.ManageChannels)) {
-        console.log("[CLOSE] denied — no ManageChannels");
-        return interaction.reply({ content: "Only staff can close tickets.", ephemeral: true });
-      }
-
-      await interaction.reply("Closing ticket and saving transcript...");
-
-      try {
-        console.log("[CLOSE] fetching transcript ch 1480283062284845060");
-        const transcriptCh = await interaction.guild.channels.fetch("1480283062284845060");
-        console.log("[CLOSE] got ch:", transcriptCh ? transcriptCh.name : "null");
-
-        const fetched = await interaction.channel.messages.fetch({ limit: 100 });
-        const sorted = [...fetched.values()].reverse();
-        console.log("[CLOSE] messages:", sorted.length);
-
-        const lines2 = sorted.map(m => {
-          const t = new Date(m.createdTimestamp).toISOString().replace("T"," ").slice(0,19);
-          const body = m.content || (m.embeds.length ? "[embed]" : m.attachments.size ? "[file]" : "");
-          return "[" + t + "] " + m.author.username + ": " + body;
-        });
-
-        const buf = Buffer.from(lines2.join("\n"), "utf8");
-        const file = new AttachmentBuilder(buf, { name: "transcript-" + interaction.channel.name + ".txt" });
-
-        const embed = new EmbedBuilder()
-          .setTitle("Ticket Transcript")
-          .setDescription("Channel: " + interaction.channel.name + "\nClosed by: " + interaction.user.username + "\nMessages: " + sorted.length)
-          .setColor(0xe91e8c)
-          .setTimestamp();
-
-        await transcriptCh.send({ embeds: [embed], files: [file] });
-        console.log("[CLOSE] transcript sent OK");
-      } catch (err) {
-        console.error("[CLOSE] transcript FAILED:", err.message);
-      }
-
-      await interaction.channel.delete().catch(e => console.error("[CLOSE] delete err:", e.message));
-      return;
-    }
-
-  // ── Ask staff button ──
-  if (interaction.isButton() && interaction.customId === TICKET_STAFF) {
-    if (!isTicketChannel(interaction.channel)) {
-      return interaction.reply({ content: "This button only works inside an open ticket.", ephemeral: true });
-    }
-
-    const status = await notifyTicketStaff(interaction.channel, interaction.user, "The member clicked **Call Staff**.");
-    const reply = status === "already"
-      ? "✅ Staff has already been notified for this ticket."
-      : status === "notified"
-        ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
-        : "⚠️ Staff is not configured yet. Ask an administrator to run `!ticketsetup`.";
-    return interaction.reply({ content: reply, ephemeral: true });
-  }
-
-  // ── Create simple support ticket ──
-  if (interaction.isButton() && interaction.customId === TICKET_CREATE) {
-    const { user, guild } = interaction;
-    if (!guild) return;
-
-    const existing = guild.channels.cache.find(
-      channel => channel.topic === `ticket:${user.id}` ||
-        channel.name === `ticket-${user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80)}`
-    );
-    if (existing) {
-      return interaction.reply({ content: `You already have an open ticket: ${existing}`, ephemeral: true });
-    }
-
-    const cfg = getConfig(guild.id);
-    const staffRoleId = cfg.ticketRole || process.env.TICKET_ROLE_ID;
-    const safeName = user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80) || "user";
-
-    try {
-      const ch = await guild.channels.create({
-        name: `ticket-${safeName}`,
-        topic: `ticket:${user.id}`,
-        parent: cfg.ticketCategory || process.env.TICKET_CATEGORY_ID || undefined,
-        permissionOverwrites: [
-          { id: guild.roles.everyone, deny: ["ViewChannel"] },
-          { id: user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
-          ...(staffRoleId ? [{ id: staffRoleId, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] }] : []),
-          { id: OWNER_ID, allow: ["ViewChannel","SendMessages","ReadMessageHistory"] },
-          { id: client.user.id, allow: ["ViewChannel","SendMessages","ReadMessageHistory","ManageChannels"] },
-        ],
-      });
-
-      const ticketRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(TICKET_STAFF).setLabel("👥 Call Staff").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(TICKET_CLOSE).setLabel("🔒 Close Ticket").setStyle(ButtonStyle.Danger)
-      );
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎫 Support Ticket")
-        .setDescription(`Hey ${user}! I’m here to help. Tell me what you need and I’ll do my best to answer.\n\nIf you need a human staff member, say **"I need staff"** or press **Call Staff** below.`)
-        .setColor(0xe91e8c)
-        .setFooter({ text: "662 Support • Staff will be notified when requested" })
-        .setTimestamp();
-      const attachment = botImageAttachment();
-      if (attachment) embed.setImage("attachment://bot.gif");
-
-      await ch.send({
-        content: `${user}`,
-        embeds: [embed],
-        files: attachment ? [attachment] : [],
-        components: [ticketRow],
-      });
-      if (!interaction.replied) await interaction.reply({ content: `✅ Your support ticket has been opened: ${ch}`, ephemeral: true });
-    } catch (e) {
-      console.error("Ticket create error:", e);
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: `❌ Failed to create ticket: ${e.message}`, ephemeral: true }).catch(()=>{});
-      }
-    }
-    return;
-  }
 });
 
 // ─── Commands ───────────────────────────────────────────────────────────────
@@ -1463,64 +1187,6 @@ client.on("messageCreate", async message => {
         await message.reply("✅ Preview sent!");
         break;
       }
-      case "staff":
-      case "needstaff":
-      case "callstaff": {
-        if (!isTicketChannel(message.channel)) {
-          return void message.reply({ content: "This command can only be used inside an open ticket.", allowedMentions: { parse: [] } });
-        }
-        const reason = args.join(" ").trim() || "They requested staff assistance.";
-        const status = await notifyTicketStaff(message.channel, message.author, reason);
-        const reply = status === "already"
-          ? "✅ Staff has already been notified for this ticket."
-          : status === "notified"
-            ? "✅ I’ve notified the staff team. They’ll join this ticket when available."
-            : "⚠️ Staff is not configured yet. Ask an administrator to run `!ticketsetup`.";
-        await message.reply({ content: reply, allowedMentions: { parse: [] } });
-        break;
-      }
-      case "ticketsetup": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        const categoryId = args.find(a => /^\d{17,19}$/.test(a));
-        // Role can be given as a mention, a raw ID, or just its name — no ping required.
-        const roleQuery = args.filter(a => a !== categoryId).join(" ");
-        const role = message.mentions.roles.first() || resolveRole(message.guild, roleQuery);
-        if (!categoryId && !role) return void message.reply("Usage: `!ticketsetup <category-id> [staff-role name or ID]`");
-        setConfig(message.guild.id, {
-          ...(categoryId ? { ticketCategory: categoryId } : {}),
-          ...(role ? { ticketRole: role.id } : {}),
-        });
-        await message.reply({ content: `✅ Ticket config updated.${categoryId ? ` Category: \`${categoryId}\`` : ""}${role ? ` Staff role: **${role.name}**` : ""}`, allowedMentions: { parse: [] } });
-        break;
-      }
-      case "ticketpanel": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-
-        const imagePath = BOT_IMAGE_PATH;
-        const hasImage = fs.existsSync(imagePath);
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(TICKET_CREATE).setLabel("🎫 Open Support Ticket").setStyle(ButtonStyle.Primary)
-        );
-
-        const embed = new EmbedBuilder()
-          .setTitle("🎫 Support Ticket")
-          .setDescription("Need help? Open one private support ticket and tell the bot what you need.\n\nThe bot will talk with you in the ticket. Say **\"I need staff\"** or press **Call Staff** when you want the staff team to join.")
-          .setColor(0xe91e8c)
-          .setFooter({ text: "662 Support • One ticket per member" })
-          .setTimestamp();
-
-        if (hasImage) {
-          const attachment = new AttachmentBuilder(imagePath, { name: "bot.gif" });
-          embed.setImage("attachment://bot.gif");
-          await message.channel.send({ embeds: [embed], files: [attachment], components: [row] });
-        } else {
-          await message.channel.send({ embeds: [embed], components: [row] });
-        }
-
-        if (message.deletable) await message.delete().catch(()=>{});
-        break;
-      }
       case "setmodlog": {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
@@ -1529,15 +1195,6 @@ client.on("messageCreate", async message => {
         await message.reply(`✅ Mod log set to ${ch}`);
         break;
       }
-      case "settranscript": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
-        const ch = message.mentions.channels.first();
-        if (!ch) return void message.reply("Usage: `!settranscript #channel`");
-        setConfig(message.guild.id, { transcriptChannel: ch.id });
-        await message.reply(`✅ Transcript channel set to ${ch}`);
-        break;
-      }
-
       // ── Moderation ────────────────────────────────────────────────────────
       case "kick": {
         if (!requirePerm(message, PermissionFlagsBits.KickMembers)) return;
@@ -1769,12 +1426,6 @@ client.on("messageCreate", async message => {
           "`!slots <amount|all>` — Play slots",
           "`!dice <amount|all>` — Play dice",
           "`!leaderboard` / `!lb` — View the richest members",
-          "",
-          "**🎫 Tickets**",
-          "`!ticketsetup <category-id> [@staff-role]` — Configure tickets",
-          "`!ticketpanel` — Post the support ticket button",
-          "`!settranscript #channel` — Set transcript channel",
-          "Say \"I need staff\" or use `!staff` in a ticket — Ping the staff team",
           "",
           "**⚙️ Admin**",
           "`!say [#channel] <message>` — Make the bot say something",
