@@ -513,9 +513,33 @@ const TICKET_ASSISTANT_SYSTEM_PROMPT = [
   "If the member asks for staff, the bot application will notify the configured staff team."
 ].join(" ");
 
+function localTicketReply(text) {
+  const lower = text.toLowerCase();
+
+  if (/^(hi|hey|hello|yo|hiya)\b/.test(lower)) {
+    return "Hey! I’m here to help. Tell me what you need and I’ll guide you. If you want a human staff member, say **“I need staff”** or press **Call Staff**.";
+  }
+  if (/\b(access|verify|verification|role|join)\b/.test(lower)) {
+    return "I can help with access and verification. Please explain what you are trying to access and what happens when you try it. If it needs a staff decision, say **“I need staff”**.";
+  }
+  if (/\b(alliance|ally|partner|partnership)\b/.test(lower)) {
+    return "Thanks for your partnership request. Tell me who you represent and what kind of alliance you are looking for. I can call the staff team when you are ready.";
+  }
+  if (/\b(payment|pay|price|cost|buy|purchase|money)\b/.test(lower)) {
+    return "I can collect the details, but staff makes final decisions about payments and purchases. Tell me what you are trying to buy or pay for, then say **“I need staff”** if you want them to join.";
+  }
+  if (/\b(bug|error|broken|not work|issue|problem)\b/.test(lower)) {
+    return "Thanks for reporting that. Tell me what you clicked, what you expected, and what happened instead. I’ll pass it to staff if needed.";
+  }
+
+  return "Thanks for explaining that. I’m the first-line support assistant, so I can help gather the details. What result are you trying to get, and what is stopping you? Say **“I need staff”** whenever you want the staff team to join.";
+}
+
 function callOpenAI(messages) {
   return new Promise((resolve, reject) => {
-    if (!process.env.OPENAI_API_KEY) return reject(new Error("OPENAI_API_KEY is not configured"));
+    if (!process.env.OPENAI_API_KEY) {
+      return resolve(localTicketReply(messages[messages.length - 1]?.content || ""));
+    }
     const payload = JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       messages,
