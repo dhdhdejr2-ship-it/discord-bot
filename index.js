@@ -858,6 +858,38 @@ client.on("messageCreate", async message => {
         break;
       }
       case "steal": {
+        // If the argument is a Discord custom emoji, copy it into this server.
+        const emojiToken = args[0];
+        const customEmoji = emojiToken?.match(/^<(a?):([\w~]+):(\d+)>$/);
+        if (customEmoji) {
+          const botMember = message.guild.members.me;
+          if (!botMember?.permissions.has(PermissionFlagsBits.ManageGuildExpressions)) {
+            return void message.reply("❌ I need **Manage Expressions** permission to add emojis to this server.");
+          }
+
+          const [, animatedFlag, emojiName, emojiId] = customEmoji;
+          const extension = animatedFlag ? "gif" : "png";
+          const emojiUrl = "https://cdn.discordapp.com/emojis/" + emojiId + "." + extension + "?size=128&quality=lossless";
+          const requestedName = args[1] || emojiName;
+          const safeName = requestedName.replace(/[^\w~]/g, "").slice(0, 32);
+          if (!safeName) {
+            return void message.reply("❌ Use a valid emoji name containing letters, numbers, underscores, or tildes.");
+          }
+
+          try {
+            const createdEmoji = await message.guild.emojis.create({
+              attachment: emojiUrl,
+              name: safeName,
+              reason: "Copied by " + message.author.tag + " with !steal",
+            });
+            await message.reply("✅ " + createdEmoji + " added with the name **\"" + safeName + "\"**.");
+          } catch (error) {
+            console.error("Failed to steal emoji:", error);
+            await message.reply("❌ I couldn't add that emoji. Check the server's emoji slots, the emoji format, and my Manage Expressions permission.");
+          }
+          break;
+        }
+
         const user = targetUser;
         if (!user || user.id === message.author.id) return void message.reply("Usage: `!steal <@user>`");
         if (user.bot) return void message.reply("You can't steal from a bot.");
@@ -1422,6 +1454,7 @@ client.on("messageCreate", async message => {
           "`!grab` — Grab a random reward",
           "`!give @user <amount>` — Give chips",
           "`!steal @user` — Try to steal chips",
+          "`!steal <emoji>` — Copy a custom emoji from another server",
           "`!coinflip <amount|all>` — Bet on a coin flip",
           "`!slots <amount|all>` — Play slots",
           "`!dice <amount|all>` — Play dice",
