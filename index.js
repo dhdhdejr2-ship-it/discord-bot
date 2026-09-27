@@ -572,6 +572,29 @@ client.on("messageCreate", async message => {
     switch (cmd) {
 
       // ── General ──────────────────────────────────────────────────────────
+      case "react": {
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("🚫 This command is locked — only the bot owner can use it.");
+        }
+
+        const messageId = args[0];
+        const reaction = args.slice(1).join(" ").trim();
+        if (!messageId || !/^\d{17,20}$/.test(messageId) || !reaction) {
+          return void message.reply("Usage: `!react <message-id> <emoji>` (run it in the channel containing the message)");
+        }
+
+        try {
+          const targetMessage = await message.channel.messages.fetch(messageId);
+          const customEmoji = reaction.match(/^<a?:[\w~]+:(\d+)>$/);
+          await targetMessage.react(customEmoji ? customEmoji[1] : reaction);
+          await message.reply("✅ Reacted to the message with " + reaction + ".");
+        } catch (error) {
+          console.error("Failed to react to message:", error);
+          await message.reply("❌ I couldn't react to that message. Check the message ID, emoji, and my access to the message.");
+        }
+        break;
+      }
+
       case "roleicon": {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
           return void message.reply("❌ You need **Administrator** permission to use this command.");
@@ -1435,6 +1458,7 @@ client.on("messageCreate", async message => {
           "`!avatar [@user]` — Show an avatar",
           "`!membercount` — Show server member count",
           "`!roleicon @Role :emoji:` — Set a role icon (Administrator only)",
+          "`!react <message-id> <emoji>` — React to a message (owner only)",
           "",
           "**🔧 Utility**",
           "`!poll Question? | Option 1 | Option 2` — Create a poll",
