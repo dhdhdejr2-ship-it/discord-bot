@@ -584,15 +584,29 @@ client.on("messageCreate", async message => {
         }
 
         try {
-          const targetMessage = await message.channel.messages.fetch(messageId);
+          // Look in the current channel first, then other accessible text channels
+          // so the owner only needs the message ID.
+          const channels = [message.channel, ...message.guild.channels.cache.values()];
+          const checkedChannels = new Set();
+          let targetMessage = null;
+          for (const channel of channels) {
+            if (!channel?.messages || checkedChannels.has(channel.id)) continue;
+            checkedChannels.add(channel.id);
+            try {
+              targetMessage = await channel.messages.fetch(messageId);
+              if (targetMessage) break;
+            } catch {}
+          }
+          if (!targetMessage) {
+            return void message.reply("❌ I could not find that message in a channel I can access.");
+          }
           const customEmoji = reaction.match(/^<a?:[\w~]+:(\d+)>$/);
           await targetMessage.react(customEmoji ? customEmoji[1] : reaction);
           await message.reply("✅ Reacted to the message with " + reaction + ".");
         } catch (error) {
           console.error("Failed to react to message:", error);
-          await message.reply("❌ I couldn't react to that message. Check the message ID, emoji, and my access to the message.");
+          await message.reply("❌ I could not react to that message. Check the message ID, emoji, and my access to the message.");
         }
-        break;
       }
 
       case "roleicon": {
