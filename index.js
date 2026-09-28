@@ -107,8 +107,7 @@ const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const startTime = Date.now();
 const AUTOMOD_RULE_PREFIX = "Bot AutoMod: ";
-const IDLE_PRESENCE_MS = 5 * 60 * 1000;
-let idlePresenceTimer = null;
+
 
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
@@ -355,18 +354,10 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-function setBotOffline() {
-  if (!client.user) return;
-  client.user.setStatus("invisible");
-  client.user.setPresence({ status: "invisible", afk: true, activities: [] });
-}
-
 function markBotActive() {
   if (!client.user) return;
   client.user.setStatus("dnd");
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
-  if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
-  idlePresenceTimer = setTimeout(setBotOffline, IDLE_PRESENCE_MS);
 }
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
@@ -436,7 +427,7 @@ async function ensureAutoMod(guild) {
 }
 client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
-  setBotOffline();
+  markBotActive();
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
