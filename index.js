@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -106,7 +106,7 @@ const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const startTime = Date.now();
-const AUTOMOD_MENTION_RULE_NAME = "Bot AutoMod • Mention Spam";
+const AUTOMOD_RULE_PREFIX = "Bot AutoMod: ";
 
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
@@ -372,46 +372,55 @@ async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
 }
 
 async function enforceGuildAllowlist() {
-  for (const guild of client.guilds.cache.values()) {
-    await leaveUnauthorizedGuild(guild, "startup check");
-  }
+  // Multi-server mode: keep the bot in every server it is invited to.
 }
+
+const AUTOMOD_RULE_SPECS = [
+  { suffix: "Mention Spam", triggerType: AutoModerationRuleTriggerType.MentionSpam, triggerMetadata: { mentionTotalLimit: 5 } },
+  { suffix: "Spam Messages", triggerType: AutoModerationRuleTriggerType.Spam },
+  { suffix: "Safety Presets", triggerType: AutoModerationRuleTriggerType.KeywordPreset, triggerMetadata: { presets: [AutoModerationRuleKeywordPresetType.Profanity, AutoModerationRuleKeywordPresetType.SexualContent, AutoModerationRuleKeywordPresetType.Slurs] } },
+  { suffix: "Discord Invites", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["discord.gg/", "discord.com/invite/"] } },
+  { suffix: "Nitro Scams", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["free nitro", "claim nitro"] } },
+  { suffix: "Prize Scams", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["you won a prize", "claim your prize"] } },
+  { suffix: "Account Scams", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["verify your account", "free robux"] } },
+  { suffix: "Crypto Scams", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["crypto giveaway", "double your crypto"] } },
+  { suffix: "Phishing Links", triggerType: AutoModerationRuleTriggerType.Keyword, triggerMetadata: { keywordFilter: ["steam gift", "free gift card"] } },
+];
 
 async function ensureAutoMod(guild) {
   const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
   if (!botMember?.permissions.has(PermissionFlagsBits.ManageGuild)) {
-    console.warn(`⚠️ AutoMod is not enabled in ${guild.name}: the bot needs Manage Server.`);
-    return { created: false, reason: "missing_permission" };
+    console.warn("⚠️ AutoMod is not enabled in " + guild.name + ": the bot needs Manage Server.");
+    return { created: 0, existing: 0, failed: AUTOMOD_RULE_SPECS.length, reason: "missing_permission" };
   }
-
   let rules;
   try {
     rules = await guild.autoModerationRules.fetch();
   } catch (error) {
-    console.error(`❌ Could not read AutoMod rules in ${guild.name}:`, error);
-    return { created: false, reason: "fetch_failed" };
+    console.error("❌ Could not read AutoMod rules in " + guild.name + ":", error);
+    return { created: 0, existing: 0, failed: AUTOMOD_RULE_SPECS.length, reason: "fetch_failed" };
   }
-
-  if (rules.some(rule => rule.name === AUTOMOD_MENTION_RULE_NAME)) {
-    return { created: false, existing: true };
+  let created = 0;
+  let existing = 0;
+  let failed = 0;
+  for (const spec of AUTOMOD_RULE_SPECS) {
+    const name = AUTOMOD_RULE_PREFIX + spec.suffix;
+    if (rules.some(rule => rule.name === name)) {
+      existing++;
+      continue;
+    }
+    try {
+      const options = { name, eventType: AutoModerationRuleEventType.MessageSend, triggerType: spec.triggerType, actions: [{ type: AutoModerationActionType.BlockMessage }], enabled: true, reason: "Enable bot AutoMod safety protection" };
+      if (spec.triggerMetadata) options.triggerMetadata = spec.triggerMetadata;
+      await guild.autoModerationRules.create(options);
+      created++;
+    } catch (error) {
+      failed++;
+      console.error("❌ Could not create AutoMod rule " + name + " in " + guild.name + ":", error);
+    }
   }
-
-  try {
-    await guild.autoModerationRules.create({
-      name: AUTOMOD_MENTION_RULE_NAME,
-      eventType: AutoModerationRuleEventType.MessageSend,
-      triggerType: AutoModerationRuleTriggerType.MentionSpam,
-      triggerMetadata: { mentionTotalLimit: 5 },
-      actions: [{ type: AutoModerationActionType.BlockMessage }],
-      enabled: true,
-      reason: "Enable bot AutoMod mention-spam protection",
-    });
-    console.log(`✅ AutoMod mention-spam protection enabled in ${guild.name}`);
-    return { created: true };
-  } catch (error) {
-    console.error(`❌ Could not create AutoMod rule in ${guild.name}:`, error);
-    return { created: false, reason: "create_failed" };
-  }
+  console.log("✅ AutoMod checked " + guild.name + ": " + created + " created, " + existing + " already present, " + failed + " failed.");
+  return { created, existing, failed };
 }
 client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
@@ -419,13 +428,12 @@ client.once("clientReady", async c => {
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
-  const allowedGuild = c.guilds.cache.get(ALLOWED_GUILD_ID);
-  if (allowedGuild) await ensureAutoMod(allowedGuild);
+  for (const guild of c.guilds.cache.values()) await ensureAutoMod(guild);
 });
 
-// If somebody manages to add the bot, leave immediately unless it is the owner server.
+// Configure AutoMod whenever the bot joins another server.
 client.on("guildCreate", guild => {
-  void leaveUnauthorizedGuild(guild, "new server");
+  void ensureAutoMod(guild);
 });
 
 // ─── Welcome ───────────────────────────────────────────────────────────────
@@ -649,11 +657,16 @@ client.on("messageCreate", async message => {
         if ((args[0] || "setup").toLowerCase() !== "setup") {
           return void message.reply("Usage: `!automod setup`");
         }
-        const result = await ensureAutoMod(message.guild);
-        if (result.created) return void message.reply("✅ AutoMod is enabled. It will block messages with more than 5 mentions.");
-        if (result.existing) return void message.reply("✅ AutoMod mention-spam protection is already enabled.");
-        if (result.reason === "missing_permission") return void message.reply("❌ I need **Manage Server** permission to configure AutoMod.");
-        return void message.reply("❌ I could not configure AutoMod. Check my server permissions and try again.");
+        let created = 0;
+        let existing = 0;
+        let failed = 0;
+        for (const guild of client.guilds.cache.values()) {
+          const result = await ensureAutoMod(guild);
+          created += result.created || 0;
+          existing += result.existing || 0;
+          failed += result.failed || 0;
+        }
+        return void message.reply(`✅ AutoMod checked ${client.guilds.cache.size} server(s): ${created} rules created, ${existing} already present, ${failed} failed.`);
       }
 
       case "roleicon": {
@@ -1520,7 +1533,7 @@ client.on("messageCreate", async message => {
           "`!membercount` — Show server member count",
           "`!roleicon @Role :emoji:` — Set a role icon (Administrator only)",
           "`!react <message-id> <emoji>` — React to a server message (owner only)",
-          "`!automod setup` — Enable mention-spam protection (owner only)",
+          "`!automod setup` — Set up AutoMod across all servers (owner only)",
           "",
           "**🔧 Utility**",
           "`!poll Question? | Option 1 | Option 2` — Create a poll",
