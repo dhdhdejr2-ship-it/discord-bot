@@ -405,7 +405,8 @@ async function ensureAutoMod(guild) {
   let failed = 0;
   for (const spec of AUTOMOD_RULE_SPECS) {
     const name = AUTOMOD_RULE_PREFIX + spec.suffix;
-    if (rules.some(rule => rule.name === name)) {
+    const isExisting = rules.some(rule => rule.name === name || (spec.suffix === "Mention Spam" && rule.name === "Bot AutoMod • Mention Spam"));
+    if (isExisting) {
       existing++;
       continue;
     }
