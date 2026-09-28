@@ -651,25 +651,6 @@ client.on("messageCreate", async message => {
         }
       }
 
-      case "automod": {
-        if (message.author.id !== OWNER_ID) {
-          return void message.reply("🚫 This command is locked — only the bot owner can use it.");
-        }
-        if ((args[0] || "setup").toLowerCase() !== "setup") {
-          return void message.reply("Usage: `!automod setup`");
-        }
-        let created = 0;
-        let existing = 0;
-        let failed = 0;
-        for (const guild of client.guilds.cache.values()) {
-          const result = await ensureAutoMod(guild);
-          created += result.created || 0;
-          existing += result.existing || 0;
-          failed += result.failed || 0;
-        }
-        return void message.reply(`✅ AutoMod checked ${client.guilds.cache.size} server(s): ${created} rules created, ${existing} already present, ${failed} failed.`);
-      }
-
       case "roleicon": {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
           return void message.reply("❌ You need **Administrator** permission to use this command.");
@@ -1534,7 +1515,6 @@ client.on("messageCreate", async message => {
           "`!membercount` — Show server member count",
           "`!roleicon @Role :emoji:` — Set a role icon (Administrator only)",
           "`!react <message-id> <emoji>` — React to a server message (owner only)",
-          "`!automod setup` — Set up AutoMod across all servers (owner only)",
           "",
           "**🔧 Utility**",
           "`!poll Question? | Option 1 | Option 2` — Create a poll",
