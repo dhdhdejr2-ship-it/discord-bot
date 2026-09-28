@@ -355,16 +355,18 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+function setBotOffline() {
+  if (!client.user) return;
+  client.user.setStatus("invisible");
+  client.user.setPresence({ status: "invisible", afk: true, activities: [] });
+}
+
 function markBotActive() {
   if (!client.user) return;
   client.user.setStatus("dnd");
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
   if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
-  idlePresenceTimer = setTimeout(() => {
-    if (!client.user) return;
-    client.user.setStatus("invisible");
-    client.user.setPresence({ status: "invisible", afk: true, activities: [] });
-  }, IDLE_PRESENCE_MS);
+  idlePresenceTimer = setTimeout(setBotOffline, IDLE_PRESENCE_MS);
 }
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
@@ -434,7 +436,7 @@ async function ensureAutoMod(guild) {
 }
 client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
-  markBotActive();
+  setBotOffline();
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
