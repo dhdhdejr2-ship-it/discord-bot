@@ -107,6 +107,8 @@ const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const startTime = Date.now();
 const AUTOMOD_RULE_PREFIX = "Bot AutoMod: ";
+const IDLE_PRESENCE_MS = 5 * 60 * 1000;
+let idlePresenceTimer = null;
 
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
@@ -357,6 +359,12 @@ function markBotActive() {
   if (!client.user) return;
   client.user.setStatus("dnd");
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
+  if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
+  idlePresenceTimer = setTimeout(() => {
+    if (!client.user) return;
+    client.user.setStatus("invisible");
+    client.user.setPresence({ status: "invisible", afk: true, activities: [] });
+  }, IDLE_PRESENCE_MS);
 }
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
