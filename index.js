@@ -355,7 +355,8 @@ const client = new Client({
 
 function markBotActive() {
   if (!client.user) return;
-  client.user.setPresence({ status: "dnd" });
+  client.user.setStatus("dnd");
+  client.user.setPresence({ status: "dnd", afk: false, activities: [] });
 }
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
