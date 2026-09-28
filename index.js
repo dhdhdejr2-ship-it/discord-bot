@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -106,8 +106,7 @@ const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)
 const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const startTime = Date.now();
-const IDLE_PRESENCE_MS = 5 * 60 * 1000;
-let idlePresenceTimer = null;
+const AUTOMOD_MENTION_RULE_NAME = "Bot AutoMod • Mention Spam";
 
 // ─── In-memory state ───────────────────────────────────────────────────────
 const sniped     = new Map(); // channelId → { author, content, timestamp }
@@ -357,10 +356,6 @@ const client = new Client({
 function markBotActive() {
   if (!client.user) return;
   client.user.setPresence({ status: "dnd" });
-  if (idlePresenceTimer) clearTimeout(idlePresenceTimer);
-  idlePresenceTimer = setTimeout(() => {
-    client.user?.setPresence({ status: "invisible" });
-  }, IDLE_PRESENCE_MS);
 }
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
@@ -382,12 +377,50 @@ async function enforceGuildAllowlist() {
   }
 }
 
+async function ensureAutoMod(guild) {
+  const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
+  if (!botMember?.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    console.warn(`⚠️ AutoMod is not enabled in ${guild.name}: the bot needs Manage Server.`);
+    return { created: false, reason: "missing_permission" };
+  }
+
+  let rules;
+  try {
+    rules = await guild.autoModerationRules.fetch();
+  } catch (error) {
+    console.error(`❌ Could not read AutoMod rules in ${guild.name}:`, error);
+    return { created: false, reason: "fetch_failed" };
+  }
+
+  if (rules.some(rule => rule.name === AUTOMOD_MENTION_RULE_NAME)) {
+    return { created: false, existing: true };
+  }
+
+  try {
+    await guild.autoModerationRules.create({
+      name: AUTOMOD_MENTION_RULE_NAME,
+      eventType: AutoModerationRuleEventType.MessageSend,
+      triggerType: AutoModerationRuleTriggerType.MentionSpam,
+      triggerMetadata: { mentionTotalLimit: 5 },
+      actions: [{ type: AutoModerationActionType.BlockMessage }],
+      enabled: true,
+      reason: "Enable bot AutoMod mention-spam protection",
+    });
+    console.log(`✅ AutoMod mention-spam protection enabled in ${guild.name}`);
+    return { created: true };
+  } catch (error) {
+    console.error(`❌ Could not create AutoMod rule in ${guild.name}:`, error);
+    return { created: false, reason: "create_failed" };
+  }
+}
 client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
   markBotActive();
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
+  const allowedGuild = c.guilds.cache.get(ALLOWED_GUILD_ID);
+  if (allowedGuild) await ensureAutoMod(allowedGuild);
 });
 
 // If somebody manages to add the bot, leave immediately unless it is the owner server.
@@ -607,6 +640,20 @@ client.on("messageCreate", async message => {
           console.error("Failed to react to message:", error);
           await message.reply("❌ I could not react to that message. Check the message ID, emoji, and my access to the message.");
         }
+      }
+
+      case "automod": {
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("🚫 This command is locked — only the bot owner can use it.");
+        }
+        if ((args[0] || "setup").toLowerCase() !== "setup") {
+          return void message.reply("Usage: `!automod setup`");
+        }
+        const result = await ensureAutoMod(message.guild);
+        if (result.created) return void message.reply("✅ AutoMod is enabled. It will block messages with more than 5 mentions.");
+        if (result.existing) return void message.reply("✅ AutoMod mention-spam protection is already enabled.");
+        if (result.reason === "missing_permission") return void message.reply("❌ I need **Manage Server** permission to configure AutoMod.");
+        return void message.reply("❌ I could not configure AutoMod. Check my server permissions and try again.");
       }
 
       case "roleicon": {
@@ -1472,7 +1519,8 @@ client.on("messageCreate", async message => {
           "`!avatar [@user]` — Show an avatar",
           "`!membercount` — Show server member count",
           "`!roleicon @Role :emoji:` — Set a role icon (Administrator only)",
-          "`!react <message-id> <emoji>` — React to a message (owner only)",
+          "`!react <message-id> <emoji>` — React to a server message (owner only)",
+          "`!automod setup` — Enable mention-spam protection (owner only)",
           "",
           "**🔧 Utility**",
           "`!poll Question? | Option 1 | Option 2` — Create a poll",
