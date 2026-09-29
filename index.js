@@ -108,8 +108,6 @@ const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
 
 const startTime = Date.now();
 const AUTOMOD_RULE_PREFIX = "Bot AutoMod: ";
-const ROBLOX_GROUP_ID = process.env.ROBLOX_GROUP_ID || "468089183";
-const ROBLOX_API_BASE = "https://apis.roblox.com/cloud/v2";
 
 
 // ─── In-memory state ───────────────────────────────────────────────────────
@@ -194,81 +192,6 @@ function formatUptime(ms) {
   const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24);
   return `${d}d ${h%24}h ${m%60}m ${s%60}s`;
 }
-
-function robloxError(result, fallback = "Roblox API request failed") {
-  return String(result?.body?.message || result?.body?.error || fallback).slice(0, 220);
-}
-
-async function robloxApi(path, options = {}) {
-  const apiKey = process.env.ROBLOX_API_KEY;
-  if (!apiKey) return { ok: false, status: 0, body: { message: "Roblox ranking is not configured yet. Add ROBLOX_API_KEY to Railway Variables." } };
-  try {
-    const response = await fetch(ROBLOX_API_BASE + path, {
-      ...options,
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-    });
-    const body = await response.json().catch(() => ({}));
-    return { ok: response.ok, status: response.status, body };
-  } catch (error) {
-    return { ok: false, status: 0, body: { message: error.message } };
-  }
-}
-
-async function lookupRobloxUser(username) {
-  try {
-    const response = await fetch("https://users.roblox.com/v1/usernames/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, message: String(body?.message || "Could not look up that Roblox username.").slice(0, 220) };
-    const user = body?.data?.[0];
-    return user ? { ok: true, user } : { ok: false, message: "That Roblox username was not found." };
-  } catch (error) {
-    return { ok: false, message: "Roblox username lookup failed: " + error.message };
-  }
-}
-
-async function rankRobloxUser(username, requestedRole) {
-  const userResult = await lookupRobloxUser(username);
-  if (!userResult.ok) return userResult;
-  const user = userResult.user;
-
-  const rolesResult = await robloxApi("/groups/" + ROBLOX_GROUP_ID + "/roles?maxPageSize=20");
-  if (!rolesResult.ok) return { ok: false, message: robloxError(rolesResult, "Could not read Roblox group roles.") };
-  const roles = Array.isArray(rolesResult.body?.groupRoles) ? rolesResult.body.groupRoles : [];
-  const wanted = requestedRole.trim().toLowerCase();
-  const role = roles.find(item => String(item.displayName || item.name || "").toLowerCase() === wanted)
-    || roles.find(item => String(item.displayName || item.name || "").toLowerCase().includes(wanted));
-  if (!role) return { ok: false, message: "That Roblox group role was not found." };
-  const rolePath = role.path || ("groups/" + ROBLOX_GROUP_ID + "/roles/" + role.id);
-
-  const membershipResult = await robloxApi(
-    "/groups/" + ROBLOX_GROUP_ID + "/memberships?maxPageSize=10&filter=" + encodeURIComponent("user == 'users/" + user.id + "'")
-  );
-  if (!membershipResult.ok) return { ok: false, message: robloxError(membershipResult, "Could not check Roblox group membership.") };
-  const membership = membershipResult.body?.groupMemberships?.[0];
-  if (!membership?.path) return { ok: false, message: "That Roblox user is not a member of the group." };
-  const membershipId = membership.path.split("/").pop();
-
-  const assignResult = await robloxApi(
-    "/groups/" + ROBLOX_GROUP_ID + "/memberships/" + encodeURIComponent(membershipId) + ":assignRole",
-    { method: "POST", body: JSON.stringify({ role: rolePath }) }
-  );
-  if (!assignResult.ok) return { ok: false, message: robloxError(assignResult, "Roblox could not assign that role. Check the bot account's group permissions and rank hierarchy.") };
-
-  const verifyResult = await robloxApi("/groups/" + ROBLOX_GROUP_ID + "/memberships/" + encodeURIComponent(membershipId));
-  if (verifyResult.ok && Array.isArray(verifyResult.body?.roles) && !verifyResult.body.roles.includes(rolePath)) {
-    return { ok: false, message: "Roblox accepted the request but the new role could not be verified." };
-  }
-  return { ok: true, username: user.name, role: role.displayName || role.name || requestedRole };
-}
-
 
 async function logToModlog(guild, embed) {
   const cfg = getConfig(guild.id);
@@ -873,20 +796,6 @@ client.on("messageCreate", async message => {
 
   try {
     switch (cmd) {
-
-      case "rank": {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-          return void message.reply("❌ You need Administrator permission to use this command.");
-        }
-        const robloxUsername = args.shift();
-        const robloxRole = args.join(" ").trim();
-        if (!robloxUsername || !robloxRole) {
-          return void message.reply("Usage: !rank <RobloxUsername> <Role Name>");
-        }
-        const result = await rankRobloxUser(robloxUsername, robloxRole);
-        if (!result.ok) return void message.reply("❌ " + result.message);
-        return void message.reply("✅ Ranked **" + result.username + "** to **" + result.role + "** in the Roblox group.");
-      }
 
       case "security": {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -1849,7 +1758,6 @@ client.on("messageCreate", async message => {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!verification` `!verified` `!antilink` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Roblox**  `!rank <username> <role>`",
           "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
