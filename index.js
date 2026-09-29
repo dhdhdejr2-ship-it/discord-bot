@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AuditLogEvent, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -28,6 +28,176 @@ function setConfig(guildId, changes) {
   cfg[guildId] = { ...cfg[guildId], ...changes };
   saveJSON("config.json", cfg);
 }
+
+
+// ─── Server security ────────────────────────────────────────────────────────
+// Security is opt-in per server. Run !security setup to enable the defaults.
+const SECURITY_DEFAULTS = {
+  enabled: false,
+  punishment: "kick",
+  whitelistUsers: [],
+  whitelistRoles: [],
+  antiRaid: { enabled: false, maxJoins: 5, windowMs: 10000, punishment: "kick" },
+  antiNuke: { enabled: false, maxActions: 3, windowMs: 10000, punishment: "ban" },
+  antiRole: { enabled: false, punishment: "kick" },
+};
+const securityActionHistory = new Map();
+const raidJoinHistory = new Map();
+
+function getSecurity(guildId) {
+  const all = loadJSON("security.json", {});
+  const raw = all[guildId] || {};
+  return {
+    ...SECURITY_DEFAULTS,
+    ...raw,
+    whitelistUsers: Array.isArray(raw.whitelistUsers) ? raw.whitelistUsers : [],
+    whitelistRoles: Array.isArray(raw.whitelistRoles) ? raw.whitelistRoles : [],
+    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(raw.antiRaid || {}) },
+    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(raw.antiNuke || {}) },
+    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(raw.antiRole || {}) },
+  };
+}
+
+function setSecurity(guildId, changes) {
+  const all = loadJSON("security.json", {});
+  const current = all[guildId] || {};
+  all[guildId] = {
+    ...current,
+    ...changes,
+    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(current.antiRaid || {}), ...(changes.antiRaid || {}) },
+    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(current.antiNuke || {}), ...(changes.antiNuke || {}) },
+    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(current.antiRole || {}), ...(changes.antiRole || {}) },
+  };
+  saveJSON("security.json", all);
+  return getSecurity(guildId);
+}
+
+function securityAction(cfg, category) {
+  return [cfg[category]?.punishment, cfg.punishment, SECURITY_DEFAULTS.punishment]
+    .find(value => ["kick", "ban", "timeout", "strip"].includes(value)) || "kick";
+}
+
+function securityWhitelisted(guild, userId) {
+  if (!userId) return true;
+  if (userId === client.user?.id || userId === OWNER_ID || userId === guild.ownerId) return true;
+  const cfg = getSecurity(guild.id);
+  if (cfg.whitelistUsers.includes(userId)) return true;
+  const member = guild.members.cache.get(userId);
+  return Boolean(member?.roles.cache.some(role => cfg.whitelistRoles.includes(role.id)));
+}
+
+async function punishSecurityMember(guild, userId, action, reason) {
+  if (!userId || securityWhitelisted(guild, userId)) return false;
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member || member.user.bot) return false;
+  const botMember = guild.members.me;
+  if (!botMember || member.roles.highest.position >= botMember.roles.highest.position) {
+    console.warn("Security could not punish a higher/equal role:", member.user.tag);
+    return false;
+  }
+  try {
+    if (action === "ban" && member.bannable) await member.ban({ reason });
+    else if (action === "kick" && member.kickable) await member.kick(reason);
+    else if (action === "timeout" && member.moderatable) await member.timeout(24 * 60 * 60 * 1000, reason);
+    else if (action === "strip" && member.manageable) await member.roles.set([guild.id], reason);
+    else return false;
+    console.log("Security punishment:", action, member.user.tag, reason);
+    return true;
+  } catch (error) {
+    console.error("Security punishment failed:", error.message);
+    return false;
+  }
+}
+
+async function recentAuditExecutor(guild, type, targetId) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 10 });
+    const entry = logs.entries.find(item =>
+      (!targetId || item.target?.id === targetId) && Date.now() - item.createdTimestamp < 15000
+    );
+    return entry?.executor || null;
+  } catch (error) {
+    console.warn("Security could not read audit logs:", error.message);
+    return null;
+  }
+}
+
+function securityThreshold(guildId, executorId, category, limit, windowMs) {
+  const key = guildId + ":" + executorId + ":" + category;
+  const now = Date.now();
+  const hits = (securityActionHistory.get(key) || []).filter(time => now - time < windowMs);
+  hits.push(now);
+  securityActionHistory.set(key, hits);
+  if (hits.length < limit) return false;
+  securityActionHistory.delete(key);
+  return true;
+}
+
+async function handleNukeAction(guild, type, targetId, reason) {
+  const cfg = getSecurity(guild.id);
+  if (!cfg.enabled || !cfg.antiNuke.enabled) return;
+  const executor = await recentAuditExecutor(guild, type, targetId);
+  if (!executor || securityWhitelisted(guild, executor.id)) return;
+  if (!securityThreshold(guild.id, executor.id, "antiNuke", cfg.antiNuke.maxActions, cfg.antiNuke.windowMs)) return;
+  await punishSecurityMember(guild, executor.id, securityAction(cfg, "antiNuke"), "Anti-nuke: " + reason);
+}
+
+client.on("guildMemberAdd", async member => {
+  const cfg = getSecurity(member.guild.id);
+  if (!cfg.enabled || !cfg.antiRaid.enabled || securityWhitelisted(member.guild, member.id)) return;
+  const now = Date.now();
+  const recent = (raidJoinHistory.get(member.guild.id) || []).filter(time => now - time < cfg.antiRaid.windowMs);
+  recent.push(now);
+  raidJoinHistory.set(member.guild.id, recent);
+  if (recent.length >= cfg.antiRaid.maxJoins) {
+    await punishSecurityMember(member.guild, member.id, securityAction(cfg, "antiRaid"), "Anti-raid: join burst detected");
+  }
+});
+
+client.on("channelDelete", channel => {
+  if (channel.guild) handleNukeAction(channel.guild, AuditLogEvent.ChannelDelete, channel.id, "channel deletion burst");
+});
+
+client.on("guildBanAdd", ban => {
+  handleNukeAction(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id, "member ban burst");
+});
+
+client.on("roleCreate", async role => {
+  const cfg = getSecurity(role.guild.id);
+  if (!cfg.enabled || !cfg.antiRole.enabled) return;
+  const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
+  if (!executor || securityWhitelisted(role.guild, executor.id)) return;
+  if (!role.managed && role.editable) await role.delete("Anti-role: unauthorized role creation").catch(() => {});
+  await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role creation");
+});
+
+client.on("roleDelete", async role => {
+  const cfg = getSecurity(role.guild.id);
+  if (cfg.enabled && cfg.antiRole.enabled) {
+    const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
+    if (executor && !securityWhitelisted(role.guild, executor.id)) {
+      await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role deletion");
+    }
+  }
+  handleNukeAction(role.guild, AuditLogEvent.RoleDelete, role.id, "role deletion burst");
+});
+
+client.on("roleUpdate", async (oldRole, newRole) => {
+  const cfg = getSecurity(newRole.guild.id);
+  if (!cfg.enabled || !cfg.antiRole.enabled || newRole.managed) return;
+  const executor = await recentAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
+  if (!executor || securityWhitelisted(newRole.guild, executor.id)) return;
+  if (newRole.editable) {
+    await newRole.edit({
+      name: oldRole.name,
+      permissions: oldRole.permissions,
+      color: oldRole.color,
+      hoist: oldRole.hoist,
+      mentionable: oldRole.mentionable,
+    }, "Anti-role: unauthorized role update").catch(() => {});
+  }
+  await punishSecurityMember(newRole.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role update");
+});
 
 const warnings = {
   add(w) { const d = loadJSON("warnings.json"); d.push(w); saveJSON("warnings.json", d); },
@@ -128,6 +298,20 @@ function parseTimeoutDuration(s) {
   if (viaUnit) return viaUnit;
   const n = Number(s);
   return Number.isFinite(n) && n > 0 ? n * 60000 : null;
+}
+
+
+function rejectSelfModeration(msg, user) {
+  if (!user) return false;
+  if (user.id === msg.author.id) {
+    msg.reply("You can't use moderation commands on yourself.").catch(() => {});
+    return true;
+  }
+  if (user.id === client.user?.id) {
+    msg.reply("I can't moderate myself.").catch(() => {});
+    return true;
+  }
+  return false;
 }
 
 function requirePerm(msg, perm) {
@@ -614,6 +798,65 @@ client.on("messageCreate", async message => {
 
   try {
     switch (cmd) {
+      case "security": {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return void message.reply("🛡️ You need Administrator permission to configure server security.");
+        }
+        const sub = (args.shift() || "status").toLowerCase();
+        const cfg = getSecurity(message.guild.id);
+        if (sub === "setup") {
+          setSecurity(message.guild.id, {
+            enabled: true,
+            punishment: "kick",
+            antiRaid: { enabled: true, maxJoins: 5, windowMs: 10000, punishment: "kick" },
+            antiNuke: { enabled: true, maxActions: 3, windowMs: 10000, punishment: "ban" },
+            antiRole: { enabled: true, punishment: "kick" },
+          });
+          return void message.reply("🛡️ Security enabled: anti-raid, anti-nuke, anti-role, whitelist support, and self-moderation protection are active. Use !security status to view it.");
+        }
+        if (sub === "status") {
+          return void message.reply(
+            "🛡️ Security status\n" +
+            "Enabled: " + (cfg.enabled ? "Yes" : "No — run !security setup") + "\n" +
+            "Anti-raid: " + (cfg.antiRaid.enabled ? "On" : "Off") + " (" + cfg.antiRaid.maxJoins + " joins / " + (cfg.antiRaid.windowMs / 1000) + "s)\n" +
+            "Anti-nuke: " + (cfg.antiNuke.enabled ? "On" : "Off") + " (" + cfg.antiNuke.maxActions + " actions / " + (cfg.antiNuke.windowMs / 1000) + "s)\n" +
+            "Anti-role: " + (cfg.antiRole.enabled ? "On" : "Off") + "\n" +
+            "Default punishment: " + cfg.punishment + "\n" +
+            "Whitelist entries: " + (cfg.whitelistUsers.length + cfg.whitelistRoles.length)
+          );
+        }
+        if (sub === "punishment" || sub === "punish" || sub === "setpunishment") {
+          const action = (args[0] || "").toLowerCase();
+          if (!["kick", "ban", "timeout", "strip"].includes(action)) {
+            return void message.reply("Usage: !security punishment <kick|ban|timeout|strip>");
+          }
+          setSecurity(message.guild.id, { punishment: action });
+          return void message.reply("✅ Default security punishment set to " + action + ".");
+        }
+        if (["anti-raid", "antiraid", "anti-nuke", "antinuke", "anti-role", "antirole"].includes(sub)) {
+          const enabled = ["on", "enable", "enabled", "true"].includes((args[0] || "").toLowerCase());
+          const configKey = sub.includes("raid") ? "antiRaid" : sub.includes("nuke") ? "antiNuke" : "antiRole";
+          setSecurity(message.guild.id, { enabled: true, [configKey]: { enabled } });
+          return void message.reply("✅ " + configKey + " is now " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        if (sub === "whitelist" || sub === "wl") {
+          const action = (args.shift() || "list").toLowerCase();
+          const kind = (args.shift() || "user").toLowerCase();
+          const token = args[0] || "";
+          const userMention = token.match(/^<@!?(\d+)>$/);
+          const roleMention = token.match(/^<@&(\d+)>$/);
+          const id = (kind === "role" ? roleMention?.[1] : userMention?.[1]) || (/^\d{17,19}$/.test(token) ? token : null);
+          const listKey = kind === "role" ? "whitelistRoles" : "whitelistUsers";
+          if (action === "list") return void message.reply("🛡️ Whitelist entries: " + (cfg.whitelistUsers.length + cfg.whitelistRoles.length));
+          if (!["add", "remove", "delete"].includes(action) || !id) return void message.reply("Usage: !security whitelist <add|remove> <@user|@role>");
+          const next = cfg[listKey].filter(value => value !== id);
+          if (action === "add") next.push(id);
+          setSecurity(message.guild.id, { [listKey]: next });
+          return void message.reply("✅ " + (action === "add" ? "Added to" : "Removed from") + " the security whitelist.");
+        }
+        return void message.reply("Usage: !security setup, status, punishment <kick|ban|timeout|strip>, anti-raid on|off, anti-nuke on|off, anti-role on|off, or whitelist add/remove <@user|@role>");
+      }
+
 
       // ── General ──────────────────────────────────────────────────────────
       case "react": {
@@ -1312,6 +1555,7 @@ client.on("messageCreate", async message => {
       case "kick": {
         if (!requirePerm(message, PermissionFlagsBits.KickMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!kick @user [reason]`");
+        if (rejectSelfModeration(message, targetUser)) return;
         if (!targetMember.kickable) return void message.reply("I can't kick that member — they may have a role equal to or higher than mine, or I'm missing the **Kick Members** permission.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await targetMember.kick(reason);
@@ -1322,6 +1566,7 @@ client.on("messageCreate", async message => {
       case "ban": {
         if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
         if (!targetUser) return void message.reply("Usage: `!ban @user [reason]`");
+        if (rejectSelfModeration(message, targetUser)) return;
         if (targetMember && !targetMember.bannable) return void message.reply("I can't ban that member — they may have a role equal to or higher than mine, or I'm missing the **Ban Members** permission.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await message.guild.members.ban(targetUser.id, { reason });
@@ -1341,6 +1586,7 @@ client.on("messageCreate", async message => {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         const ms = parseTimeoutDuration(args[1]);
         if (!targetMember || !ms) return void message.reply("Usage: `!to @user <duration> [reason]` — e.g. `!to @user 10`, `10m`, `10min`, `1h`, `1d` (a bare number means minutes)");
+        if (rejectSelfModeration(message, targetUser)) return;
         const maxMs = 28 * 24 * 60 * 60 * 1000; // Discord's timeout cap
         if (ms > maxMs) return void message.reply("Timeout duration can't exceed 28 days.");
         if (!targetMember.moderatable) return void message.reply("I can't timeout that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
@@ -1354,6 +1600,7 @@ client.on("messageCreate", async message => {
       case "untimeout": case "rto": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!rto @user`");
+        if (rejectSelfModeration(message, targetUser)) return;
         if (!targetMember.moderatable) return void message.reply("I can't manage that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
         await targetMember.timeout(null);
         await message.reply(`✅ Removed timeout from **${targetUser.tag}**`);
