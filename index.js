@@ -839,8 +839,9 @@ client.on("messageCreate", async message => {
         }
         if (sub === "whitelist" || sub === "wl") {
           const action = (args.shift() || "list").toLowerCase();
-          const kind = (args.shift() || "user").toLowerCase();
-          const token = args[0] || "";
+          const requestedKind = (args[0] || "").toLowerCase();
+          const kind = ["user", "role"].includes(requestedKind) ? args.shift().toLowerCase() : "user";
+          const token = args.shift() || "";
           const userMention = token.match(/^<@!?(\d+)>$/);
           const roleMention = token.match(/^<@&(\d+)>$/);
           const id = (kind === "role" ? roleMention?.[1] : userMention?.[1]) || (/^\d{17,19}$/.test(token) ? token : null);
@@ -1756,7 +1757,7 @@ client.on("messageCreate", async message => {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!verification` `!verified` `!antilink` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off`",
+          "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|"**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
