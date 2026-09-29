@@ -371,8 +371,8 @@ const client = new Client({
 
 function markBotActive() {
   if (!client.user) return;
-  client.user.setStatus("dnd");
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
+  console.log("🔴 Bot presence set to Do Not Disturb");
 }
 
 // ─── Server security ────────────────────────────────────────────────────────
@@ -609,6 +609,7 @@ async function ensureAutoMod(guild) {
 client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
   markBotActive();
+  setInterval(markBotActive, 60 * 1000);
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
