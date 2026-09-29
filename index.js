@@ -1757,7 +1757,7 @@ client.on("messageCreate", async message => {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!verification` `!verified` `!antilink` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|"**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
+          "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
