@@ -376,15 +376,15 @@ function markBotActive() {
 }
 
 // ─── Server security ────────────────────────────────────────────────────────
-// Security is opt-in per server. Run !security setup to enable the defaults.
+// Security is opt-in per server. Automated security actions only remove roles.
 const SECURITY_DEFAULTS = {
   enabled: false,
-  punishment: "kick",
+  punishment: "strip",
   whitelistUsers: [],
   whitelistRoles: [],
-  antiRaid: { enabled: false, maxJoins: 5, windowMs: 10000, punishment: "kick" },
-  antiNuke: { enabled: false, maxActions: 3, windowMs: 10000, punishment: "ban" },
-  antiRole: { enabled: false, punishment: "kick" },
+  antiRaid: { enabled: false, maxJoins: 5, windowMs: 10000, punishment: "strip" },
+  antiNuke: { enabled: false, maxActions: 3, windowMs: 10000, punishment: "strip" },
+  antiRole: { enabled: false, punishment: "strip" },
 };
 const securityActionHistory = new Map();
 const raidJoinHistory = new Map();
@@ -417,9 +417,8 @@ function setSecurity(guildId, changes) {
   return getSecurity(guildId);
 }
 
-function securityAction(cfg, category) {
-  return [cfg[category]?.punishment, cfg.punishment, SECURITY_DEFAULTS.punishment]
-    .find(value => ["kick", "ban", "timeout", "strip"].includes(value)) || "kick";
+function securityAction() {
+  return "strip";
 }
 
 function securityWhitelisted(guild, userId) {
@@ -441,10 +440,7 @@ async function punishSecurityMember(guild, userId, action, reason) {
     return false;
   }
   try {
-    if (action === "ban" && member.bannable) await member.ban({ reason });
-    else if (action === "kick" && member.kickable) await member.kick(reason);
-    else if (action === "timeout" && member.moderatable) await member.timeout(24 * 60 * 60 * 1000, reason);
-    else if (action === "strip" && member.manageable) await member.roles.set([guild.id], reason);
+    if (action === "strip" && member.manageable) await member.roles.set([guild.id], reason);
     else return false;
     console.log("Security punishment:", action, member.user.tag, reason);
     return true;
@@ -808,10 +804,10 @@ client.on("messageCreate", async message => {
         if (sub === "setup") {
           setSecurity(message.guild.id, {
             enabled: true,
-            punishment: "kick",
-            antiRaid: { enabled: true, maxJoins: 5, windowMs: 10000, punishment: "kick" },
-            antiNuke: { enabled: true, maxActions: 3, windowMs: 10000, punishment: "ban" },
-            antiRole: { enabled: true, punishment: "kick" },
+            punishment: "strip",
+            antiRaid: { enabled: true, maxJoins: 5, windowMs: 10000, punishment: "strip" },
+            antiNuke: { enabled: true, maxActions: 3, windowMs: 10000, punishment: "strip" },
+            antiRole: { enabled: true, punishment: "strip" },
           });
           return void message.reply("🛡️ Security enabled: anti-raid, anti-nuke, anti-role, whitelist support, and self-moderation protection are active. Use !security status to view it.");
         }
@@ -822,17 +818,17 @@ client.on("messageCreate", async message => {
             "Anti-raid: " + (cfg.antiRaid.enabled ? "On" : "Off") + " (" + cfg.antiRaid.maxJoins + " joins / " + (cfg.antiRaid.windowMs / 1000) + "s)\n" +
             "Anti-nuke: " + (cfg.antiNuke.enabled ? "On" : "Off") + " (" + cfg.antiNuke.maxActions + " actions / " + (cfg.antiNuke.windowMs / 1000) + "s)\n" +
             "Anti-role: " + (cfg.antiRole.enabled ? "On" : "Off") + "\n" +
-            "Default punishment: " + cfg.punishment + "\n" +
+             "Automated punishment: remove roles only\n" +
             "Whitelist entries: " + (cfg.whitelistUsers.length + cfg.whitelistRoles.length)
           );
         }
         if (sub === "punishment" || sub === "punish" || sub === "setpunishment") {
           const action = (args[0] || "").toLowerCase();
-          if (!["kick", "ban", "timeout", "strip"].includes(action)) {
-            return void message.reply("Usage: !security punishment <kick|ban|timeout|strip>");
+          if (action !== "strip") {
+            return void message.reply("Usage: !security punishment strip (role removal only)");
           }
-          setSecurity(message.guild.id, { punishment: action });
-          return void message.reply("✅ Default security punishment set to " + action + ".");
+          setSecurity(message.guild.id, { punishment: "strip" });
+          return void message.reply("✅ Automated security punishment is now role removal only.");
         }
         if (["anti-raid", "antiraid", "anti-nuke", "antinuke", "anti-role", "antirole"].includes(sub)) {
           const enabled = ["on", "enable", "enabled", "true"].includes((args[0] || "").toLowerCase());
@@ -855,7 +851,7 @@ client.on("messageCreate", async message => {
           setSecurity(message.guild.id, { [listKey]: next });
           return void message.reply("✅ " + (action === "add" ? "Added to" : "Removed from") + " the security whitelist.");
         }
-        return void message.reply("Usage: !security setup, status, punishment <kick|ban|timeout|strip>, anti-raid on|off, anti-nuke on|off, anti-role on|off, or whitelist add/remove <@user|@role>");
+        return void message.reply("Usage: !security setup, status, punishment strip, anti-raid on|off, anti-nuke on|off, anti-role on|off, or whitelist add/remove <@user|@role>");
       }
 
 
