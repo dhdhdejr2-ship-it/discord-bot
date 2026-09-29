@@ -30,175 +30,6 @@ function setConfig(guildId, changes) {
 }
 
 
-// ─── Server security ────────────────────────────────────────────────────────
-// Security is opt-in per server. Run !security setup to enable the defaults.
-const SECURITY_DEFAULTS = {
-  enabled: false,
-  punishment: "kick",
-  whitelistUsers: [],
-  whitelistRoles: [],
-  antiRaid: { enabled: false, maxJoins: 5, windowMs: 10000, punishment: "kick" },
-  antiNuke: { enabled: false, maxActions: 3, windowMs: 10000, punishment: "ban" },
-  antiRole: { enabled: false, punishment: "kick" },
-};
-const securityActionHistory = new Map();
-const raidJoinHistory = new Map();
-
-function getSecurity(guildId) {
-  const all = loadJSON("security.json", {});
-  const raw = all[guildId] || {};
-  return {
-    ...SECURITY_DEFAULTS,
-    ...raw,
-    whitelistUsers: Array.isArray(raw.whitelistUsers) ? raw.whitelistUsers : [],
-    whitelistRoles: Array.isArray(raw.whitelistRoles) ? raw.whitelistRoles : [],
-    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(raw.antiRaid || {}) },
-    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(raw.antiNuke || {}) },
-    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(raw.antiRole || {}) },
-  };
-}
-
-function setSecurity(guildId, changes) {
-  const all = loadJSON("security.json", {});
-  const current = all[guildId] || {};
-  all[guildId] = {
-    ...current,
-    ...changes,
-    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(current.antiRaid || {}), ...(changes.antiRaid || {}) },
-    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(current.antiNuke || {}), ...(changes.antiNuke || {}) },
-    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(current.antiRole || {}), ...(changes.antiRole || {}) },
-  };
-  saveJSON("security.json", all);
-  return getSecurity(guildId);
-}
-
-function securityAction(cfg, category) {
-  return [cfg[category]?.punishment, cfg.punishment, SECURITY_DEFAULTS.punishment]
-    .find(value => ["kick", "ban", "timeout", "strip"].includes(value)) || "kick";
-}
-
-function securityWhitelisted(guild, userId) {
-  if (!userId) return true;
-  if (userId === client.user?.id || userId === OWNER_ID || userId === guild.ownerId) return true;
-  const cfg = getSecurity(guild.id);
-  if (cfg.whitelistUsers.includes(userId)) return true;
-  const member = guild.members.cache.get(userId);
-  return Boolean(member?.roles.cache.some(role => cfg.whitelistRoles.includes(role.id)));
-}
-
-async function punishSecurityMember(guild, userId, action, reason) {
-  if (!userId || securityWhitelisted(guild, userId)) return false;
-  const member = await guild.members.fetch(userId).catch(() => null);
-  if (!member || member.user.bot) return false;
-  const botMember = guild.members.me;
-  if (!botMember || member.roles.highest.position >= botMember.roles.highest.position) {
-    console.warn("Security could not punish a higher/equal role:", member.user.tag);
-    return false;
-  }
-  try {
-    if (action === "ban" && member.bannable) await member.ban({ reason });
-    else if (action === "kick" && member.kickable) await member.kick(reason);
-    else if (action === "timeout" && member.moderatable) await member.timeout(24 * 60 * 60 * 1000, reason);
-    else if (action === "strip" && member.manageable) await member.roles.set([guild.id], reason);
-    else return false;
-    console.log("Security punishment:", action, member.user.tag, reason);
-    return true;
-  } catch (error) {
-    console.error("Security punishment failed:", error.message);
-    return false;
-  }
-}
-
-async function recentAuditExecutor(guild, type, targetId) {
-  try {
-    const logs = await guild.fetchAuditLogs({ type, limit: 10 });
-    const entry = logs.entries.find(item =>
-      (!targetId || item.target?.id === targetId) && Date.now() - item.createdTimestamp < 15000
-    );
-    return entry?.executor || null;
-  } catch (error) {
-    console.warn("Security could not read audit logs:", error.message);
-    return null;
-  }
-}
-
-function securityThreshold(guildId, executorId, category, limit, windowMs) {
-  const key = guildId + ":" + executorId + ":" + category;
-  const now = Date.now();
-  const hits = (securityActionHistory.get(key) || []).filter(time => now - time < windowMs);
-  hits.push(now);
-  securityActionHistory.set(key, hits);
-  if (hits.length < limit) return false;
-  securityActionHistory.delete(key);
-  return true;
-}
-
-async function handleNukeAction(guild, type, targetId, reason) {
-  const cfg = getSecurity(guild.id);
-  if (!cfg.enabled || !cfg.antiNuke.enabled) return;
-  const executor = await recentAuditExecutor(guild, type, targetId);
-  if (!executor || securityWhitelisted(guild, executor.id)) return;
-  if (!securityThreshold(guild.id, executor.id, "antiNuke", cfg.antiNuke.maxActions, cfg.antiNuke.windowMs)) return;
-  await punishSecurityMember(guild, executor.id, securityAction(cfg, "antiNuke"), "Anti-nuke: " + reason);
-}
-
-client.on("guildMemberAdd", async member => {
-  const cfg = getSecurity(member.guild.id);
-  if (!cfg.enabled || !cfg.antiRaid.enabled || securityWhitelisted(member.guild, member.id)) return;
-  const now = Date.now();
-  const recent = (raidJoinHistory.get(member.guild.id) || []).filter(time => now - time < cfg.antiRaid.windowMs);
-  recent.push(now);
-  raidJoinHistory.set(member.guild.id, recent);
-  if (recent.length >= cfg.antiRaid.maxJoins) {
-    await punishSecurityMember(member.guild, member.id, securityAction(cfg, "antiRaid"), "Anti-raid: join burst detected");
-  }
-});
-
-client.on("channelDelete", channel => {
-  if (channel.guild) handleNukeAction(channel.guild, AuditLogEvent.ChannelDelete, channel.id, "channel deletion burst");
-});
-
-client.on("guildBanAdd", ban => {
-  handleNukeAction(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id, "member ban burst");
-});
-
-client.on("roleCreate", async role => {
-  const cfg = getSecurity(role.guild.id);
-  if (!cfg.enabled || !cfg.antiRole.enabled) return;
-  const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
-  if (!executor || securityWhitelisted(role.guild, executor.id)) return;
-  if (!role.managed && role.editable) await role.delete("Anti-role: unauthorized role creation").catch(() => {});
-  await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role creation");
-});
-
-client.on("roleDelete", async role => {
-  const cfg = getSecurity(role.guild.id);
-  if (cfg.enabled && cfg.antiRole.enabled) {
-    const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
-    if (executor && !securityWhitelisted(role.guild, executor.id)) {
-      await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role deletion");
-    }
-  }
-  handleNukeAction(role.guild, AuditLogEvent.RoleDelete, role.id, "role deletion burst");
-});
-
-client.on("roleUpdate", async (oldRole, newRole) => {
-  const cfg = getSecurity(newRole.guild.id);
-  if (!cfg.enabled || !cfg.antiRole.enabled || newRole.managed) return;
-  const executor = await recentAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-  if (!executor || securityWhitelisted(newRole.guild, executor.id)) return;
-  if (newRole.editable) {
-    await newRole.edit({
-      name: oldRole.name,
-      permissions: oldRole.permissions,
-      color: oldRole.color,
-      hoist: oldRole.hoist,
-      mentionable: oldRole.mentionable,
-    }, "Anti-role: unauthorized role update").catch(() => {});
-  }
-  await punishSecurityMember(newRole.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role update");
-});
-
 const warnings = {
   add(w) { const d = loadJSON("warnings.json"); d.push(w); saveJSON("warnings.json", d); },
   forUser(guildId, userId) { return loadJSON("warnings.json").filter(w => w.guildId === guildId && w.userId === userId); },
@@ -543,6 +374,176 @@ function markBotActive() {
   client.user.setStatus("dnd");
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
 }
+
+// ─── Server security ────────────────────────────────────────────────────────
+// Security is opt-in per server. Run !security setup to enable the defaults.
+const SECURITY_DEFAULTS = {
+  enabled: false,
+  punishment: "kick",
+  whitelistUsers: [],
+  whitelistRoles: [],
+  antiRaid: { enabled: false, maxJoins: 5, windowMs: 10000, punishment: "kick" },
+  antiNuke: { enabled: false, maxActions: 3, windowMs: 10000, punishment: "ban" },
+  antiRole: { enabled: false, punishment: "kick" },
+};
+const securityActionHistory = new Map();
+const raidJoinHistory = new Map();
+
+function getSecurity(guildId) {
+  const all = loadJSON("security.json", {});
+  const raw = all[guildId] || {};
+  return {
+    ...SECURITY_DEFAULTS,
+    ...raw,
+    whitelistUsers: Array.isArray(raw.whitelistUsers) ? raw.whitelistUsers : [],
+    whitelistRoles: Array.isArray(raw.whitelistRoles) ? raw.whitelistRoles : [],
+    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(raw.antiRaid || {}) },
+    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(raw.antiNuke || {}) },
+    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(raw.antiRole || {}) },
+  };
+}
+
+function setSecurity(guildId, changes) {
+  const all = loadJSON("security.json", {});
+  const current = all[guildId] || {};
+  all[guildId] = {
+    ...current,
+    ...changes,
+    antiRaid: { ...SECURITY_DEFAULTS.antiRaid, ...(current.antiRaid || {}), ...(changes.antiRaid || {}) },
+    antiNuke: { ...SECURITY_DEFAULTS.antiNuke, ...(current.antiNuke || {}), ...(changes.antiNuke || {}) },
+    antiRole: { ...SECURITY_DEFAULTS.antiRole, ...(current.antiRole || {}), ...(changes.antiRole || {}) },
+  };
+  saveJSON("security.json", all);
+  return getSecurity(guildId);
+}
+
+function securityAction(cfg, category) {
+  return [cfg[category]?.punishment, cfg.punishment, SECURITY_DEFAULTS.punishment]
+    .find(value => ["kick", "ban", "timeout", "strip"].includes(value)) || "kick";
+}
+
+function securityWhitelisted(guild, userId) {
+  if (!userId) return true;
+  if (userId === client.user?.id || userId === OWNER_ID || userId === guild.ownerId) return true;
+  const cfg = getSecurity(guild.id);
+  if (cfg.whitelistUsers.includes(userId)) return true;
+  const member = guild.members.cache.get(userId);
+  return Boolean(member?.roles.cache.some(role => cfg.whitelistRoles.includes(role.id)));
+}
+
+async function punishSecurityMember(guild, userId, action, reason) {
+  if (!userId || securityWhitelisted(guild, userId)) return false;
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member || member.user.bot) return false;
+  const botMember = guild.members.me;
+  if (!botMember || member.roles.highest.position >= botMember.roles.highest.position) {
+    console.warn("Security could not punish a higher/equal role:", member.user.tag);
+    return false;
+  }
+  try {
+    if (action === "ban" && member.bannable) await member.ban({ reason });
+    else if (action === "kick" && member.kickable) await member.kick(reason);
+    else if (action === "timeout" && member.moderatable) await member.timeout(24 * 60 * 60 * 1000, reason);
+    else if (action === "strip" && member.manageable) await member.roles.set([guild.id], reason);
+    else return false;
+    console.log("Security punishment:", action, member.user.tag, reason);
+    return true;
+  } catch (error) {
+    console.error("Security punishment failed:", error.message);
+    return false;
+  }
+}
+
+async function recentAuditExecutor(guild, type, targetId) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 10 });
+    const entry = logs.entries.find(item =>
+      (!targetId || item.target?.id === targetId) && Date.now() - item.createdTimestamp < 15000
+    );
+    return entry?.executor || null;
+  } catch (error) {
+    console.warn("Security could not read audit logs:", error.message);
+    return null;
+  }
+}
+
+function securityThreshold(guildId, executorId, category, limit, windowMs) {
+  const key = guildId + ":" + executorId + ":" + category;
+  const now = Date.now();
+  const hits = (securityActionHistory.get(key) || []).filter(time => now - time < windowMs);
+  hits.push(now);
+  securityActionHistory.set(key, hits);
+  if (hits.length < limit) return false;
+  securityActionHistory.delete(key);
+  return true;
+}
+
+async function handleNukeAction(guild, type, targetId, reason) {
+  const cfg = getSecurity(guild.id);
+  if (!cfg.enabled || !cfg.antiNuke.enabled) return;
+  const executor = await recentAuditExecutor(guild, type, targetId);
+  if (!executor || securityWhitelisted(guild, executor.id)) return;
+  if (!securityThreshold(guild.id, executor.id, "antiNuke", cfg.antiNuke.maxActions, cfg.antiNuke.windowMs)) return;
+  await punishSecurityMember(guild, executor.id, securityAction(cfg, "antiNuke"), "Anti-nuke: " + reason);
+}
+
+client.on("guildMemberAdd", async member => {
+  const cfg = getSecurity(member.guild.id);
+  if (!cfg.enabled || !cfg.antiRaid.enabled || securityWhitelisted(member.guild, member.id)) return;
+  const now = Date.now();
+  const recent = (raidJoinHistory.get(member.guild.id) || []).filter(time => now - time < cfg.antiRaid.windowMs);
+  recent.push(now);
+  raidJoinHistory.set(member.guild.id, recent);
+  if (recent.length >= cfg.antiRaid.maxJoins) {
+    await punishSecurityMember(member.guild, member.id, securityAction(cfg, "antiRaid"), "Anti-raid: join burst detected");
+  }
+});
+
+client.on("channelDelete", channel => {
+  if (channel.guild) handleNukeAction(channel.guild, AuditLogEvent.ChannelDelete, channel.id, "channel deletion burst");
+});
+
+client.on("guildBanAdd", ban => {
+  handleNukeAction(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id, "member ban burst");
+});
+
+client.on("roleCreate", async role => {
+  const cfg = getSecurity(role.guild.id);
+  if (!cfg.enabled || !cfg.antiRole.enabled) return;
+  const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
+  if (!executor || securityWhitelisted(role.guild, executor.id)) return;
+  if (!role.managed && role.editable) await role.delete("Anti-role: unauthorized role creation").catch(() => {});
+  await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role creation");
+});
+
+client.on("roleDelete", async role => {
+  const cfg = getSecurity(role.guild.id);
+  if (cfg.enabled && cfg.antiRole.enabled) {
+    const executor = await recentAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
+    if (executor && !securityWhitelisted(role.guild, executor.id)) {
+      await punishSecurityMember(role.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role deletion");
+    }
+  }
+  handleNukeAction(role.guild, AuditLogEvent.RoleDelete, role.id, "role deletion burst");
+});
+
+client.on("roleUpdate", async (oldRole, newRole) => {
+  const cfg = getSecurity(newRole.guild.id);
+  if (!cfg.enabled || !cfg.antiRole.enabled || newRole.managed) return;
+  const executor = await recentAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
+  if (!executor || securityWhitelisted(newRole.guild, executor.id)) return;
+  if (newRole.editable) {
+    await newRole.edit({
+      name: oldRole.name,
+      permissions: oldRole.permissions,
+      color: oldRole.color,
+      hoist: oldRole.hoist,
+      mentionable: oldRole.mentionable,
+    }, "Anti-role: unauthorized role update").catch(() => {});
+  }
+  await punishSecurityMember(newRole.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role update");
+});
+
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
   if (guild.id === ALLOWED_GUILD_ID) return false;
