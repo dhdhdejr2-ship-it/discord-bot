@@ -99,7 +99,9 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
-const ALLOWED_GUILD_ID = "1546675179093102694"; // the only server where the bot may stay
+const KOC_BRAND = "KOC Kill Ops City";
+const KOC_VERIFIED_ROLE_NAME = "KOC Verified";
+const ALLOWED_GUILD_ID = "1448233642999545920"; // KOC Kill Ops City server
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
@@ -230,7 +232,7 @@ async function configureVerification(message, args) {
   const verifiedRole = roleMention || resolveRole(message.guild, roleQuery);
 
   if (!verifiedRole) {
-    await message.reply("Please choose a role first. Example: `!verification setup @Verified ✅`");
+    await message.reply("Please choose a role first. Example: `!verification setup @KOC Verified ✅`");
     return;
   }
   if (!verifiedRole.editable) {
@@ -251,7 +253,7 @@ async function postVerificationPanel(message) {
   const cfg = getConfig(message.guild.id);
   const verifiedRole = cfg.verifiedRole ? message.guild.roles.cache.get(cfg.verifiedRole) : null;
   if (!verifiedRole) {
-    await message.reply("Verification is not configured. Run `!verification setup @Verified ✅` first.");
+    await message.reply("Verification is not configured. Run `!verification setup @KOC Verified ✅` first.");
     return;
   }
   const verifyButton = new ButtonBuilder()
@@ -349,6 +351,12 @@ const BOT_IMAGE_PATH = path.join(__dirname, "assets", "bot.gif");
 function botImageAttachment() {
   if (!fs.existsSync(BOT_IMAGE_PATH)) return null;
   return new AttachmentBuilder(BOT_IMAGE_PATH, { name: "bot.gif" });
+}
+
+const COMMAND_IMAGE_PATH = path.join(__dirname, "assets", "commands.gif");
+function commandImageAttachment() {
+  if (!fs.existsSync(COMMAND_IMAGE_PATH)) return null;
+  return new AttachmentBuilder(COMMAND_IMAGE_PATH, { name: "koc-commands.gif" });
 }
 
 function welcomeImageAttachment() { return botImageAttachment(); }
@@ -555,7 +563,7 @@ async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
 }
 
 async function enforceGuildAllowlist() {
-  // Multi-server mode: keep the bot in every server it is invited to.
+  // Leaving other guilds is explicitly owner-triggered with !leave; never auto-leave on startup.
 }
 
 const AUTOMOD_RULE_SPECS = [
@@ -1076,7 +1084,7 @@ client.on("messageCreate", async message => {
         break;
       }
 
-      // ── 662 Casino ───────────────────────────────────────────────────────
+      // ── KOC Kill Ops City Casino ───────────────────────────────────────────────────────
       case "balance": case "bal": {
         const user = targetUser || message.author;
         const acc = economy.get(message.guild.id, user.id);
@@ -1279,7 +1287,7 @@ client.on("messageCreate", async message => {
         economy.add(message.guild.id, message.author.id, delta);
         const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🎰 662 Slots")
+          .setTitle("🎰 KOC Kill Ops City Slots")
           .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}\n${delta >= 0 ? `Won **${fmtMoney(delta)}**` : `Lost **${fmtMoney(-delta)}**`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(jackpot ? 0xffd700 : win3 ? 0x57f287 : win2 ? 0x99aab5 : 0xed4245)] });
         break;
@@ -1302,13 +1310,14 @@ client.on("messageCreate", async message => {
           .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
         break;
       }
+      case "leave":
       case "leaveall":
       case "leave-all": {
         if (message.author.id !== OWNER_ID) {
           return void message.reply("🚫 This command is locked — only the owner can use it.");
         }
         if (message.guild.id !== ALLOWED_GUILD_ID) {
-          return void message.reply("🚫 This command can only be used in the owner server.");
+          return void message.reply("🚫 This command can only be used in the KOC Kill Ops City server.");
         }
 
         const otherGuilds = [...client.guilds.cache.values()]
@@ -1316,10 +1325,10 @@ client.on("messageCreate", async message => {
         let leftCount = 0;
 
         for (const guild of otherGuilds) {
-          if (await leaveUnauthorizedGuild(guild, "!leaveall command")) leftCount++;
+          if (await leaveUnauthorizedGuild(guild, `!${cmd} command`)) leftCount++;
         }
 
-        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the owner server.`);
+        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the KOC Kill Ops City server.`);
         break;
       }
       case "givemoney": {
@@ -1341,7 +1350,7 @@ client.on("messageCreate", async message => {
           const u = await client.users.fetch(e.userId).catch(() => null);
           return `**${i + 1}.** ${u ? u.username : "Unknown User"} — ${fmtMoney(e.balance)}`;
         }));
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 662 Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 KOC Kill Ops City Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
         break;
       }
 
@@ -1422,22 +1431,22 @@ client.on("messageCreate", async message => {
       }
       case "verified": case "verify": {
         if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        if (!targetMember) return void message.reply("Usage: `!verified @user` — manually assign the configured Verification role.");
+        if (!targetMember) return void message.reply("Usage: `!verified @user` — manually assign the configured KOC Verified role.");
 
         const cfg = getConfig(message.guild.id);
         let verifiedRole = cfg.verifiedRole
           ? message.guild.roles.cache.get(cfg.verifiedRole)
-          : message.guild.roles.cache.find(r => r.name.toLowerCase() === "verified");
+          : message.guild.roles.cache.find(r => [KOC_VERIFIED_ROLE_NAME.toLowerCase(), "verified"].includes(r.name.toLowerCase()));
         if (!verifiedRole) {
           verifiedRole = await message.guild.roles.create({
-            name: "Verified",
+            name: KOC_VERIFIED_ROLE_NAME,
             color: 0x3498db,
-            reason: "Created by the !verified command",
+            reason: `Created by the !verified command for ${KOC_BRAND}`,
           });
           setConfig(message.guild.id, { verifiedRole: verifiedRole.id });
         }
         if (!verifiedRole.editable) {
-          return void message.reply("I can't manage the **Verified** role yet. Move it below my bot's highest role.");
+          return void message.reply(`I can't manage the **${verifiedRole.name}** role yet. Move it below my bot's highest role.`);
         }
         if (targetMember.roles.cache.has(verifiedRole.id)) {
           return void message.reply(`✅ **${targetUser.tag}** already has the **${verifiedRole.name}** role.`);
@@ -1752,7 +1761,7 @@ client.on("messageCreate", async message => {
       // ── Help ─────────────────────────────────────────────────────────────
       case "help": {
         const helpLines = [
-          "**📖 926von Commands**",
+          "**📖 " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
@@ -1761,14 +1770,21 @@ client.on("messageCreate", async message => {
           "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
+          "**Owner**  `!leave` — leave other servers; keep KOC Kill Ops City",
           "",
           "Use `!security status` to view security settings."
         ];
 
+        const helpAttachment = commandImageAttachment();
         const helpEmbed = new EmbedBuilder()
           .setDescription(helpLines.join("\n"))
           .setColor(0x5865f2);
-        await message.reply({ embeds: [helpEmbed], allowedMentions: { parse: [] } });
+        if (helpAttachment) helpEmbed.setImage("attachment://koc-commands.gif");
+        await message.reply({
+          embeds: [helpEmbed],
+          files: helpAttachment ? [helpAttachment] : [],
+          allowedMentions: { parse: [] },
+        });
         break;
       }
       default: return;
