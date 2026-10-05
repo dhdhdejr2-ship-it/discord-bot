@@ -101,7 +101,7 @@ const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const KOC_BRAND = "KOC Kill Ops City";
 const KOC_VERIFIED_ROLE_NAME = "KOC Verified";
-const ALLOWED_GUILD_ID = "1448233642999545920"; // KOC Kill Ops City server
+const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
@@ -550,7 +550,7 @@ client.on("roleUpdate", async (oldRole, newRole) => {
 
 
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
-  if (guild.id === ALLOWED_GUILD_ID) return false;
+  if (guild.id === PROTECTED_GUILD_ID) return false;
 
   console.log(`🚪 Leaving unauthorized server ${guild.name} (${guild.id}) — ${reason}`);
   try {
@@ -959,9 +959,10 @@ client.on("messageCreate", async message => {
         break;
       }
       case "botinfo": {
+        const infoImage = botImageAttachment();
         const embed = new EmbedBuilder()
-          .setTitle(`🤖 ${client.user.username} Info`)
-          .setThumbnail(client.user.displayAvatarURL({ size: 256 }))
+          .setTitle(`🤖 ${KOC_BRAND} Bot Info`)
+          .setThumbnail(infoImage ? "attachment://bot.gif" : client.user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
             { name: "Uptime", value: formatUptime(Date.now() - startTime), inline: true },
@@ -971,9 +972,9 @@ client.on("messageCreate", async message => {
             { name: "Library", value: "discord.js v14", inline: true },
             { name: "Node.js", value: process.version, inline: true },
           )
-          .setFooter({ text: "CRIMSON EM#9236" })
+          .setFooter({ text: KOC_BRAND })
           .setTimestamp();
-        await message.reply({ embeds: [embed] });
+        await message.reply({ embeds: [embed], files: infoImage ? [infoImage] : [] });
         break;
       }
       case "uptime":
@@ -1316,12 +1317,12 @@ client.on("messageCreate", async message => {
         if (message.author.id !== OWNER_ID) {
           return void message.reply("🚫 This command is locked — only the owner can use it.");
         }
-        if (message.guild.id !== ALLOWED_GUILD_ID) {
+        if (message.guild.id !== PROTECTED_GUILD_ID) {
           return void message.reply("🚫 This command can only be used in the KOC Kill Ops City server.");
         }
 
         const otherGuilds = [...client.guilds.cache.values()]
-          .filter(guild => guild.id !== ALLOWED_GUILD_ID);
+          .filter(guild => guild.id !== PROTECTED_GUILD_ID);
         let leftCount = 0;
 
         for (const guild of otherGuilds) {
@@ -1764,13 +1765,13 @@ client.on("messageCreate", async message => {
           "**📖 " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
-          "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
-          "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!say` `!announce` `!role` `!verification` `!verified` `!antilink` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Utility**  `!poll` `!math` `!remind` `!snipe`/`!s` `!afk` `!help`",
+          "**Economy**  `!balance`/`!bal` `!bank` `!deposit`/`!dep` `!withdraw`/`!with` `!grab` `!daily` `!work` `!give`/`!pay` `!steal` `!coinflip`/`!cf` `!slots` `!dice` `!leaderboard`/`!lb`",
+          "**Admin**  `!say` `!announce` `!role` `!roleicon` `!verification` `!verified`/`!verify` `!verifysetup` `!verifypanel` `!antilink`/`!anti-link` `!setwelcome` `!testwelcome` `!setleave` `!testleave` `!setmodlog`",
           "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
-          "**Giveaways**  `!giveaway` `!glist` `!gend`",
-          "**Owner**  `!leave` — leave other servers; keep KOC Kill Ops City",
+          "**Moderation**  `!kick` `!ban` `!unban` `!timeout`/`!to` `!untimeout`/`!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!clear`/`!purge`",
+          "**Giveaways**  `!giveaway`/`!gw` `!glist`/`!giveawaylist` `!gend`/`!endgiveaway`",
+          "**Owner only**  `!leave`/`!leaveall`/`!leave-all` — leaves other servers but protects this KOC server; `!givemoney`; `!react`",
           "",
           "Use `!security status` to view security settings."
         ];
@@ -1778,7 +1779,8 @@ client.on("messageCreate", async message => {
         const helpAttachment = commandImageAttachment();
         const helpEmbed = new EmbedBuilder()
           .setDescription(helpLines.join("\n"))
-          .setColor(0x5865f2);
+          .setColor(0x5865f2)
+          .setFooter({ text: KOC_BRAND });
         if (helpAttachment) helpEmbed.setImage("attachment://koc-commands.gif");
         await message.reply({
           embeds: [helpEmbed],
