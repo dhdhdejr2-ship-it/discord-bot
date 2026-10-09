@@ -787,10 +787,19 @@ client.on("interactionCreate", async interaction => {
 
 // ─── Commands ───────────────────────────────────────────────────────────────
 client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild || !message.content.startsWith(PREFIX)) return;
-  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+  if (message.author.bot || !message.guild) return;
+  if (!message.content) {
+    if (!message.attachments.size && !message.embeds.length) {
+      console.warn("[command-diagnostics] Guild message arrived with empty content; check Message Content intent.");
+    }
+    return;
+  }
+  const content = message.content.trim();
+  if (!content.startsWith(PREFIX)) return;
+  const args = content.slice(PREFIX.length).trim().split(/\s+/);
   const cmd = args.shift()?.toLowerCase();
   if (!cmd) return;
+  console.log(`[command-diagnostics] Received !${cmd}`);
   markBotActive();
 
   let targetUser = message.mentions.users.first() || null;
