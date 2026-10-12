@@ -1774,13 +1774,12 @@ client.on("messageCreate", async message => {
           "**📖 " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
-          "**Utility**  `!poll` `!math` `!remind` `!snipe`/`!s` `!afk` `!help`",
-          "**Economy**  `!balance`/`!bal` `!bank` `!deposit`/`!dep` `!withdraw`/`!with` `!grab` `!daily` `!work` `!give`/`!pay` `!steal` `!coinflip`/`!cf` `!slots` `!dice` `!leaderboard`/`!lb`",
-          "**Admin**  `!say` `!announce` `!role` `!roleicon` `!verification` `!verified`/`!verify` `!verifysetup` `!verifypanel` `!antilink`/`!anti-link` `!setwelcome` `!testwelcome` `!setleave` `!testleave` `!setmodlog`",
+          "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
+          "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
+          "**Admin**  `!say` `!announce` `!role` `!verification` `!verified` `!antilink` `!setwelcome` `!setleave` `!setmodlog`",
           "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!timeout`/`!to` `!untimeout`/`!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!clear`/`!purge`",
-          "**Giveaways**  `!giveaway`/`!gw` `!glist`/`!giveawaylist` `!gend`/`!endgiveaway`",
-          "**Owner only**  `!leave`/`!leaveall`/`!leave-all` — leaves other servers but protects this KOC server; `!givemoney`; `!react`",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
+          "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
           "Use `!security status` to view security settings."
         ];
