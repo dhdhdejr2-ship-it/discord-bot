@@ -1379,9 +1379,19 @@ client.on("messageCreate", async message => {
         if (!requirePerm(message, PermissionFlagsBits.BanMembers)) return;
         if (!targetUser) return void message.reply("Usage: `!ban @user [reason]`");
         if (rejectSelfModeration(message, targetUser)) return;
-        if (targetMember && !targetMember.bannable) return void message.reply("I can't ban that member — they may have a role equal to or higher than mine, or I'm missing the **Ban Members** permission.");
+        if (targetMember && !targetMember.bannable) {
+          if (targetMember.id === message.guild.ownerId) {
+            return void message.reply("Discord does not allow me to ban the server owner.");
+          }
+          const botHighestRole = message.guild.members.me?.roles.highest;
+          if (botHighestRole && botHighestRole.comparePositionTo(targetMember.roles.highest) <= 0) {
+            return void message.reply("I can't ban this member because their highest role is equal to or above mine. Administrator permission does not bypass Discord role hierarchy—move my highest role above theirs.");
+          }
+          return void message.reply("I can't ban this member because I need the Ban Members permission.");
+        }
         const reason = args.slice(1).join(" ") || "No reason provided";
         await message.guild.members.ban(targetUser.id, { reason });
+        console.info("[command-action] !ban outcome=success");
         await message.reply(`🔨 Banned **${targetUser.tag}** — ${reason}`);
         await logToModlog(message.guild, new EmbedBuilder().setTitle("🔨 Member Banned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xed4245).setTimestamp());
         break;
@@ -1464,15 +1474,49 @@ client.on("messageCreate", async message => {
         break;
       }
       case "clear": case "purge": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        const requiredPermission = cmd === "purge"
+          ? PermissionFlagsBits.Administrator
+          : PermissionFlagsBits.ManageMessages;
+        if (!requirePerm(message, requiredPermission)) return;
         const amount = Number(args[0]);
-        if (!amount || amount < 1 || amount > 100) return void message.reply("Usage: `!purge <1-100> [@user]`");
-        let msgs = await message.channel.messages.fetch({ limit: 100 });
-        if (targetUser) msgs = msgs.filter(m => m.author.id === targetUser.id);
-        const toDelete = [...msgs.values()].slice(0, amount);
-        await message.channel.bulkDelete(toDelete, true).catch(()=>{});
-        const reply = await message.channel.send(`🗑️ Deleted **${toDelete.length}** message(s).`);
-        setTimeout(() => reply.delete().catch(()=>{}), 3000);
+        if (!Number.isInteger(amount) || amount < 1 || amount > 100) return void message.reply("Usage: `!purge <1-100> [@user]`");
+        const botPermissions = message.guild.members.me?.permissionsIn(message.channel);
+        if (!botPermissions?.has(PermissionFlagsBits.ManageMessages) || !botPermissions.has(PermissionFlagsBits.ReadMessageHistory)) {
+          return void message.reply("I need Manage Messages and Read Message History in this channel to purge messages.");
+        }
+        try {
+          const msgs = await message.channel.messages.fetch({ limit: 100 });
+          const maxAgeMs = 14 * 24 * 60 * 60 * 1000;
+          const toDelete = [...msgs.values()]
+            .filter(m => m.id !== message.id && (!targetUser || m.author.id === targetUser.id))
+            .filter(m => Date.now() - m.createdTimestamp < maxAgeMs)
+            .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+            .slice(0, amount);
+          if (!toDelete.length) {
+            return void message.reply("No eligible recent messages found. Discord does not allow bulk deletion of messages older than 14 days.");
+          }
+          let deletedCount = 0;
+          if (toDelete.length === 1) {
+            await toDelete[0].delete();
+            deletedCount = 1;
+          } else {
+            const deleted = await message.channel.bulkDelete(toDelete, true);
+            deletedCount = deleted.size;
+          }
+          if (!deletedCount) {
+            return void message.reply("No messages were deleted. Check my Manage Messages permission and try again.");
+          }
+          console.info(`[command-action] !purge outcome=success count=${deletedCount}`);
+          const reply = await message.channel.send(`🗑️ Deleted **${deletedCount}** message(s).`);
+          setTimeout(() => reply.delete().catch(()=>{}), 3000);
+        } catch (err) {
+          const errorCode = err?.code ?? err?.rawError?.code ?? "unknown";
+          console.error(`[command-diagnostics] !purge failed code=${errorCode}`);
+          const reason = Number(errorCode) === 50013
+            ? "Discord denied the delete. Check my Manage Messages permission in this channel."
+            : "Purge failed; Discord did not confirm any deletions. Check my channel permissions and try again.";
+          await message.reply(`❌ ${reason}`);
+        }
         break;
       }
 
@@ -1591,8 +1635,12 @@ client.on("messageCreate", async message => {
       default: return;
     }
   } catch (err) {
-    console.error(`Error in !${cmd}:`, err);
-    await message.reply("Something went wrong.").catch(()=>{});
+    const errorCode = err?.code ?? err?.rawError?.code ?? "unknown";
+    console.error(`[command-diagnostics] !${cmd} failed code=${errorCode}`);
+    const reason = Number(errorCode) === 50013
+      ? "Discord denied the action. Check the bot's channel permissions and role hierarchy."
+      : `The command failed (error code ${errorCode}).`;
+    await message.reply(`❌ !${cmd} failed. ${reason}`).catch(()=>{});
   }
 });
 
