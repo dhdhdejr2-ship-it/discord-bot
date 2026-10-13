@@ -1474,7 +1474,10 @@ client.on("messageCreate", async message => {
         break;
       }
       case "clear": case "purge": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        const requiredPermission = cmd === "purge"
+          ? PermissionFlagsBits.Administrator
+          : PermissionFlagsBits.ManageMessages;
+        if (!requirePerm(message, requiredPermission)) return;
         const amount = Number(args[0]);
         if (!Number.isInteger(amount) || amount < 1 || amount > 100) return void message.reply("Usage: `!purge <1-100> [@user]`");
         const botPermissions = message.guild.members.me?.permissionsIn(message.channel);
