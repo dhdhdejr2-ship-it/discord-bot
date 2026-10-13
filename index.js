@@ -100,7 +100,6 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const KOC_BRAND = "KOC Kill Ops City";
-const KOC_VERIFIED_ROLE_NAME = "KOC Verified";
 const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
@@ -213,75 +212,6 @@ function safeMath(expr) {
     if (typeof result !== "number" || !isFinite(result)) return null;
     return Math.round(result * 1e10) / 1e10;
   } catch { return null; }
-}
-
-function parseButtonEmoji(value) {
-  const custom = String(value || "").match(/^<(a?):([\w~]+):(\d+)>$/);
-  if (custom) return { animated: Boolean(custom[1]), name: custom[2], id: custom[3] };
-  return value || "✅";
-}
-
-async function configureVerification(message, args) {
-  const roleMention = message.mentions.roles.first();
-  const emoji = roleMention
-    ? (args.find(value => value !== roleMention.toString()) || "✅")
-    : (args.length > 1 ? args[args.length - 1] : "✅");
-  const roleQuery = roleMention
-    ? roleMention.id
-    : (args.length > 1 ? args.slice(0, -1).join(" ") : args[0]);
-  const verifiedRole = roleMention || resolveRole(message.guild, roleQuery);
-
-  if (!verifiedRole) {
-    await message.reply("Please choose a role first. Example: `!verification setup @KOC Verified ✅`");
-    return;
-  }
-  if (!verifiedRole.editable) {
-    await message.reply(`I can't manage **${verifiedRole.name}** yet. Move it below my bot's highest role, then try again.`);
-    return;
-  }
-  setConfig(message.guild.id, {
-    verifiedRole: verifiedRole.id,
-    verifiedEmoji: emoji,
-  });
-  await message.reply({
-    content: `✅ **Verification is ready.** Members will receive **${verifiedRole.name}** when they click the ${emoji} button.`,
-    allowedMentions: { parse: [] },
-  });
-}
-
-async function postVerificationPanel(message) {
-  const cfg = getConfig(message.guild.id);
-  const verifiedRole = cfg.verifiedRole ? message.guild.roles.cache.get(cfg.verifiedRole) : null;
-  if (!verifiedRole) {
-    await message.reply("Verification is not configured. Run `!verification setup @KOC Verified ✅` first.");
-    return;
-  }
-  const verifyButton = new ButtonBuilder()
-    .setCustomId(VERIFY_BTN)
-    .setLabel("Click to Verify")
-    .setEmoji(parseButtonEmoji(cfg.verifiedEmoji || "✅"))
-    .setStyle(ButtonStyle.Primary);
-  const row = new ActionRowBuilder().addComponents(verifyButton);
-  const embed = new EmbedBuilder()
-    .setTitle("🔷 Server Verification")
-    .setDescription(
-      "Welcome to the server.\n\n" +
-      "Before you can view the rest of the community, please confirm that you have read and agree to follow the server rules.\n\n" +
-      "Click the button below to complete verification and unlock your member access."
-    )
-    .addFields({
-      name: "What happens next?",
-      value: `You will receive **${verifiedRole.name}** immediately after clicking the button.`,
-    })
-    .setColor(0x2563eb)
-    .setFooter({ text: "If the button does not work, please contact a staff member." })
-    .setTimestamp();
-  await message.channel.send({
-    embeds: [embed],
-    components: [row],
-    allowedMentions: { parse: [] },
-  });
-  if (message.deletable) await message.delete().catch(() => {});
 }
 
 // ─── Giveaways ─────────────────────────────────────────────────────────────
@@ -764,7 +694,7 @@ client.on("interactionCreate", async interaction => {
       : null;
     if (!verifiedRole) {
       return interaction.reply({
-        content: "Verification is not configured yet. Ask an administrator to run `!verifysetup @role ✅`.",
+        content: "Verification is not configured yet. Please contact a server administrator.",
         ephemeral: true,
       });
     }
@@ -814,68 +744,7 @@ client.on("messageCreate", async message => {
   try {
     switch (cmd) {
 
-      case "security": {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-          return void message.reply("🛡️ You need Administrator permission to configure server security.");
-        }
-        const sub = (args.shift() || "status").toLowerCase();
-        const cfg = getSecurity(message.guild.id);
-        if (sub === "setup") {
-          setSecurity(message.guild.id, {
-            enabled: true,
-            punishment: "strip",
-            antiRaid: { enabled: true, maxJoins: 5, windowMs: 10000, punishment: "strip" },
-            antiNuke: { enabled: true, maxActions: 3, windowMs: 10000, punishment: "strip" },
-            antiRole: { enabled: true, punishment: "strip" },
-          });
-          return void message.reply("🛡️ Security enabled: anti-raid, anti-nuke, anti-role, whitelist support, and self-moderation protection are active. Use !security status to view it.");
-        }
-        if (sub === "status") {
-          return void message.reply(
-            "🛡️ Security status\n" +
-            "Enabled: " + (cfg.enabled ? "Yes" : "No — run !security setup") + "\n" +
-            "Anti-raid: " + (cfg.antiRaid.enabled ? "On" : "Off") + " (" + cfg.antiRaid.maxJoins + " joins / " + (cfg.antiRaid.windowMs / 1000) + "s)\n" +
-            "Anti-nuke: " + (cfg.antiNuke.enabled ? "On" : "Off") + " (" + cfg.antiNuke.maxActions + " actions / " + (cfg.antiNuke.windowMs / 1000) + "s)\n" +
-            "Anti-role: " + (cfg.antiRole.enabled ? "On" : "Off") + "\n" +
-             "Automated punishment: remove roles only\n" +
-            "Whitelist entries: " + (cfg.whitelistUsers.length + cfg.whitelistRoles.length)
-          );
-        }
-        if (sub === "punishment" || sub === "punish" || sub === "setpunishment") {
-          const action = (args[0] || "").toLowerCase();
-          if (action !== "strip") {
-            return void message.reply("Usage: !security punishment strip (role removal only)");
-          }
-          setSecurity(message.guild.id, { punishment: "strip" });
-          return void message.reply("✅ Automated security punishment is now role removal only.");
-        }
-        if (["anti-raid", "antiraid", "anti-nuke", "antinuke", "anti-role", "antirole"].includes(sub)) {
-          const enabled = ["on", "enable", "enabled", "true"].includes((args[0] || "").toLowerCase());
-          const configKey = sub.includes("raid") ? "antiRaid" : sub.includes("nuke") ? "antiNuke" : "antiRole";
-          setSecurity(message.guild.id, { enabled: true, [configKey]: { enabled } });
-          return void message.reply("✅ " + configKey + " is now " + (enabled ? "enabled" : "disabled") + ".");
-        }
-        if (sub === "whitelist" || sub === "wl") {
-          const action = (args.shift() || "list").toLowerCase();
-          const requestedKind = (args[0] || "").toLowerCase();
-          const kind = ["user", "role"].includes(requestedKind) ? args.shift().toLowerCase() : "user";
-          const token = args.shift() || "";
-          const userMention = token.match(/^<@!?(\d+)>$/);
-          const roleMention = token.match(/^<@&(\d+)>$/);
-          const id = (kind === "role" ? roleMention?.[1] : userMention?.[1]) || (/^\d{17,19}$/.test(token) ? token : null);
-          const listKey = kind === "role" ? "whitelistRoles" : "whitelistUsers";
-          if (action === "list") return void message.reply("🛡️ Whitelist entries: " + (cfg.whitelistUsers.length + cfg.whitelistRoles.length));
-          if (!["add", "remove", "delete"].includes(action) || !id) return void message.reply("Usage: !security whitelist <add|remove> <@user|@role>");
-          const next = cfg[listKey].filter(value => value !== id);
-          if (action === "add") next.push(id);
-          setSecurity(message.guild.id, { [listKey]: next });
-          return void message.reply("✅ " + (action === "add" ? "Added to" : "Removed from") + " the security whitelist.");
-        }
-        return void message.reply("Usage: !security setup, status, punishment strip, anti-raid on|off, anti-nuke on|off, anti-role on|off, or whitelist add/remove <@user|@role>");
-      }
 
-
-      // ── General ──────────────────────────────────────────────────────────
       case "react": {
         if (message.author.id !== OWNER_ID) {
           return void message.reply("🚫 This command is locked — only the bot owner can use it.");
@@ -1439,83 +1308,7 @@ client.on("messageCreate", async message => {
         }
         break;
       }
-      case "verified": case "verify": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        if (!targetMember) return void message.reply("Usage: `!verified @user` — manually assign the configured KOC Verified role.");
 
-        const cfg = getConfig(message.guild.id);
-        let verifiedRole = cfg.verifiedRole
-          ? message.guild.roles.cache.get(cfg.verifiedRole)
-          : message.guild.roles.cache.find(r => [KOC_VERIFIED_ROLE_NAME.toLowerCase(), "verified"].includes(r.name.toLowerCase()));
-        if (!verifiedRole) {
-          verifiedRole = await message.guild.roles.create({
-            name: KOC_VERIFIED_ROLE_NAME,
-            color: 0x3498db,
-            reason: `Created by the !verified command for ${KOC_BRAND}`,
-          });
-          setConfig(message.guild.id, { verifiedRole: verifiedRole.id });
-        }
-        if (!verifiedRole.editable) {
-          return void message.reply(`I can't manage the **${verifiedRole.name}** role yet. Move it below my bot's highest role.`);
-        }
-        if (targetMember.roles.cache.has(verifiedRole.id)) {
-          return void message.reply(`✅ **${targetUser.tag}** already has the **${verifiedRole.name}** role.`);
-        }
-        await targetMember.roles.add(verifiedRole, `Verified by ${message.author.tag}`);
-        await message.reply(`✅ Verification complete — **${targetUser.tag}** now has **${verifiedRole.name}**.`);
-        break;
-      }
-      case "verification": {
-        const action = args[0]?.toLowerCase();
-        if (action === "setup") {
-          if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-          await configureVerification(message, args.slice(1));
-        } else if (action === "panel" || !action) {
-          if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-          await postVerificationPanel(message);
-        } else {
-          await message.reply("Use `!verification setup @role ✅` to configure it, or `!verification panel` to post the panel.");
-        }
-        break;
-      }
-      case "verifysetup": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageRoles)) return;
-        await configureVerification(message, args);
-        break;
-      }
-      case "verifypanel": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
-        await postVerificationPanel(message);
-        break;
-      }
-      case "antilink": case "anti-link": {
-        if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
-        const setting = args[0]?.toLowerCase();
-        if (setting === "role") {
-          const role = message.mentions.roles.first() || resolveRole(message.guild, args.slice(1).join(" "));
-          if (!role) return void message.reply("Choose the trusted role first. Example: `!antilink role @Staff`");
-          setConfig(message.guild.id, { antiLinkRole: role.id });
-          return void message.reply({
-            content: `✅ Link permission updated — members with **${role.name}** can send links while protection is enabled.`,
-            allowedMentions: { parse: [] },
-          });
-        }
-        if (!["on", "off", "status"].includes(setting)) {
-          return void message.reply("Usage: `!antilink <on|off|status>` or `!antilink role @role`");
-        }
-        if (setting === "status") {
-          const cfg = getConfig(message.guild.id);
-          const role = cfg.antiLinkRole ? message.guild.roles.cache.get(cfg.antiLinkRole) : null;
-          return void message.reply(`🔗 Link protection is **${cfg.antiLink ? "ON" : "OFF"}**. Trusted role: **${role?.name || "not set"}**.`);
-        }
-        const allowedRole = message.mentions.roles.first() || (setting === "on" ? resolveRole(message.guild, args.slice(1).join(" ")) : null);
-        setConfig(message.guild.id, {
-          antiLink: setting === "on",
-          ...(allowedRole ? { antiLinkRole: allowedRole.id } : {}),
-        });
-        await message.reply(`✅ Link protection is now **${setting === "on" ? "enabled" : "disabled"}**.`);
-        break;
-      }
       case "setwelcome": {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
@@ -1815,15 +1608,12 @@ client.on("messageCreate", async message => {
           "**📖 " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
-          "**Utility**  `!poll` `!math` `!remind` `!snipe`/`!s` `!afk` `!help`",
-          "**Economy**  `!balance`/`!bal` `!bank` `!deposit`/`!dep` `!withdraw`/`!with` `!grab` `!daily` `!work` `!give`/`!pay` `!steal` `!coinflip`/`!cf` `!slots` `!dice` `!leaderboard`/`!lb`",
-          "**Admin**  `!say` `!announce` `!role` `!roleicon` `!verification` `!verified`/`!verify` `!verifysetup` `!verifypanel` `!antilink`/`!anti-link` `!setwelcome` `!testwelcome` `!setleave` `!testleave` `!setmodlog`",
-          "**Security**  `!security setup` `!security status` `!security anti-role on|off` `!security anti-raid on|off` `!security anti-nuke on|off` `!security whitelist add @user`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!timeout`/`!to` `!untimeout`/`!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!clear`/`!purge`",
-          "**Giveaways**  `!giveaway`/`!gw` `!glist`/`!giveawaylist` `!gend`/`!endgiveaway`",
-          "**Owner only**  `!leave`/`!leaveall`/`!leave-all` — leaves other servers but protects this KOC server; `!givemoney`; `!react`",
+          "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
+          "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
+          "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
+          "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
-          "Use `!security status` to view security settings."
         ];
 
         const helpAttachment = commandImageAttachment();
