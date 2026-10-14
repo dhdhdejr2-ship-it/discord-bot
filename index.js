@@ -286,7 +286,7 @@ function botImageAttachment() {
 const COMMAND_IMAGE_PATH = path.join(__dirname, "assets", "commands.gif");
 function commandImageAttachment() {
   if (!fs.existsSync(COMMAND_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(COMMAND_IMAGE_PATH, { name: "zerø commands-commands.gif" });
+  return new AttachmentBuilder(COMMAND_IMAGE_PATH, { name: "zerø-commands.gif" });
 }
 
 function welcomeImageAttachment() { return botImageAttachment(); }
@@ -1624,7 +1624,7 @@ client.on("messageCreate", async message => {
           .setDescription(helpLines.join("\n"))
           .setColor(0x5865f2)
           .setFooter({ text: ZERO_COMMANDS_BRAND });
-        if (helpAttachment) helpEmbed.setImage("attachment://zerø commands-commands.gif");
+        if (helpAttachment) helpEmbed.setImage("attachment://zerø-commands.gif");
         await message.reply({
           embeds: [helpEmbed],
           files: helpAttachment ? [helpAttachment] : [],
