@@ -477,12 +477,6 @@ client.on("roleUpdate", async (oldRole, newRole) => {
   await punishSecurityMember(newRole.guild, executor.id, securityAction(cfg, "antiRole"), "Anti-role: unauthorized role update");
 });
 
-
-
-async function enforceGuildAllowlist() {
-  // Leaving other guilds is explicitly owner-triggered with !leave; never auto-leave on startup.
-}
-
 const AUTOMOD_RULE_SPECS = [
   { suffix: "Mention Spam", triggerType: AutoModerationRuleTriggerType.MentionSpam, triggerMetadata: { mentionTotalLimit: 5 } },
   { suffix: "Spam Messages", triggerType: AutoModerationRuleTriggerType.Spam },
@@ -537,7 +531,6 @@ client.once("clientReady", async c => {
   setInterval(markBotActive, 60 * 1000);
   resumeGiveaways(client);
   resumeReminders(client);
-  await enforceGuildAllowlist();
   for (const guild of c.guilds.cache.values()) await ensureAutoMod(guild);
 });
 
