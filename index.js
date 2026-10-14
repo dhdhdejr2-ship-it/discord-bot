@@ -100,7 +100,6 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const ZERO_COMMANDS_BRAND = "zerø commands";
-const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
@@ -479,18 +478,6 @@ client.on("roleUpdate", async (oldRole, newRole) => {
 });
 
 
-async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
-  if (guild.id === PROTECTED_GUILD_ID) return false;
-
-  console.log(`🚪 Leaving unauthorized server ${guild.name} (${guild.id}) — ${reason}`);
-  try {
-    await guild.leave();
-    return true;
-  } catch (error) {
-    console.error(`❌ Could not leave ${guild.name} (${guild.id}):`, error);
-    return false;
-  }
-}
 
 async function enforceGuildAllowlist() {
   // Leaving other guilds is explicitly owner-triggered with !leave; never auto-leave on startup.
@@ -1187,27 +1174,6 @@ client.on("messageCreate", async message => {
           .setTitle("🎲 Dice Duel")
           .setDescription(`You rolled **${you}**, house rolled **${house}**.\n${tie ? "🤝 Tie — bet refunded." : win ? `🎉 You won **${fmtMoney(bet)}**!` : `😢 You lost **${fmtMoney(bet)}**.`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
-        break;
-      }
-      case "leave":
-      case "leaveall":
-      case "leave-all": {
-        if (message.author.id !== OWNER_ID) {
-          return void message.reply("🚫 This command is locked — only the owner can use it.");
-        }
-        if (message.guild.id !== PROTECTED_GUILD_ID) {
-          return void message.reply("🚫 This command can only be used in the zerø commands server.");
-        }
-
-        const otherGuilds = [...client.guilds.cache.values()]
-          .filter(guild => guild.id !== PROTECTED_GUILD_ID);
-        let leftCount = 0;
-
-        for (const guild of otherGuilds) {
-          if (await leaveUnauthorizedGuild(guild, `!${cmd} command`)) leftCount++;
-        }
-
-        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the zerø commands server.`);
         break;
       }
       case "givemoney": {
