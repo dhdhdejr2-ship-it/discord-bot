@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AuditLogEvent, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AuditLogEvent, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -275,23 +275,6 @@ function resumeReminders(client) {
   }
 }
 
-// ─── Shared bot image ───────────────────────────────────────────────────────
-// All static bot panels use the uploaded GIF below.
-const BOT_IMAGE_PATH = path.join(__dirname, "assets", "bot.gif");
-function botImageAttachment() {
-  if (!fs.existsSync(BOT_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(BOT_IMAGE_PATH, { name: "bot.gif" });
-}
-
-const COMMAND_IMAGE_PATH = path.join(__dirname, "assets", "commands.gif");
-function commandImageAttachment() {
-  if (!fs.existsSync(COMMAND_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(COMMAND_IMAGE_PATH, { name: "zerø-commands.gif" });
-}
-
-function welcomeImageAttachment() { return botImageAttachment(); }
-function leaveImageAttachment() { return botImageAttachment(); }
-function giveawayImageAttachment() { return botImageAttachment(); }
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
     if (g.ended || g.ending) continue;
@@ -574,10 +557,8 @@ client.on("guildMemberAdd", async member => {
       .replace(/{server}/g, member.guild.name)
       .replace(/{count}/g, member.guild.memberCount)
       .replace(/{membercount}/g, member.guild.memberCount);
-    const attachment = welcomeImageAttachment();
-    const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://bot.gif");
-    await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
+    const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287);
+    await ch.send({ embeds: [embed] });
   } catch(e) { console.error("Welcome error:", e); }
 });
 
@@ -596,10 +577,8 @@ client.on("guildMemberRemove", async member => {
       .replace(/{server}/g, member.guild.name)
       .replace(/{count}/g, member.guild.memberCount)
       .replace(/{membercount}/g, member.guild.memberCount);
-    const attachment = leaveImageAttachment();
-    const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://bot.gif");
-    await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
+    const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245);
+    await ch.send({ embeds: [embed] });
   } catch(e) { console.error("Leave error:", e); }
 });
 
@@ -609,7 +588,6 @@ client.on("messageDelete", message => {
   if (message.content) {
     sniped.set(message.channelId, {
       author: message.author?.tag || "Unknown",
-      avatarURL: message.author?.displayAvatarURL() || null,
       content: message.content,
       timestamp: Date.now(),
     });
@@ -837,10 +815,8 @@ client.on("messageCreate", async message => {
         break;
       }
       case "botinfo": {
-        const infoImage = botImageAttachment();
         const embed = new EmbedBuilder()
           .setTitle(`🤖 ${ZERO_COMMANDS_BRAND} Bot Info`)
-          .setThumbnail(infoImage ? "attachment://bot.gif" : client.user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
             { name: "Uptime", value: formatUptime(Date.now() - startTime), inline: true },
@@ -852,7 +828,7 @@ client.on("messageCreate", async message => {
           )
           .setFooter({ text: ZERO_COMMANDS_BRAND })
           .setTimestamp();
-        await message.reply({ embeds: [embed], files: infoImage ? [infoImage] : [] });
+        await message.reply({ embeds: [embed] });
         break;
       }
       case "uptime":
@@ -863,7 +839,6 @@ client.on("messageCreate", async message => {
         const member = targetMember || message.member;
         const embed = new EmbedBuilder()
           .setTitle(`👤 ${user.tag}`)
-          .setThumbnail(user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
             { name: "ID", value: user.id, inline: true },
@@ -880,7 +855,6 @@ client.on("messageCreate", async message => {
         await g.fetch();
         const embed = new EmbedBuilder()
           .setTitle(`🏠 ${g.name}`)
-          .setThumbnail(g.iconURL({ size: 256 }) || null)
           .setColor(0x5865f2)
           .addFields(
             { name: "Owner", value: `<@${g.ownerId}>`, inline: true },
@@ -895,7 +869,7 @@ client.on("messageCreate", async message => {
       }
       case "avatar": {
         const user = targetUser || message.author;
-        await message.reply({ embeds: [new EmbedBuilder().setTitle(`🖼️ ${user.tag}'s Avatar`).setImage(user.displayAvatarURL({ size: 512 })).setColor(0x5865f2)] });
+        await message.reply(`Avatar link for **${user.tag}**: <${user.displayAvatarURL({ size: 512 })}>`);
         break;
       }
       case "membercount":
@@ -946,7 +920,7 @@ client.on("messageCreate", async message => {
           .setTitle("🔫 Sniped!")
           .setDescription(data.content)
           .setColor(0xed4245)
-          .setAuthor({ name: data.author, iconURL: data.avatarURL || undefined })
+          .setAuthor({ name: data.author })
           .setFooter({ text: `Deleted ${Math.floor((Date.now() - data.timestamp) / 1000)}s ago` });
         await message.reply({ embeds: [embed] });
         break;
@@ -1325,10 +1299,8 @@ client.on("messageCreate", async message => {
         if (!chId) return void message.reply("No welcome channel set. Use `!setwelcome #channel` first.");
         const msg = cfg.welcomeMsg || `Welcome to **${message.guild.name}**, ${message.author}! You are member #${message.guild.memberCount}.`;
         const ch = await client.channels.fetch(chId);
-        const previewAttachment = welcomeImageAttachment();
-        const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
-        await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
+        const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setFooter({ text: "This is a preview" });
+        await ch.send({ embeds: [previewEmbed] });
         await message.reply("✅ Preview sent!");
         break;
       }
@@ -1348,10 +1320,8 @@ client.on("messageCreate", async message => {
         if (!chId) return void message.reply("No leave channel set. Use `!setleave #channel` first.");
         const msg = cfg.leaveMsg || `**${message.author.username}** has left **${message.guild.name}**. We're down to ${message.guild.memberCount} members.`;
         const ch = await client.channels.fetch(chId);
-        const previewAttachment = leaveImageAttachment();
-        const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
-        await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
+        const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setFooter({ text: "This is a preview" });
+        await ch.send({ embeds: [previewEmbed] });
         await message.reply("✅ Preview sent!");
         break;
       }
@@ -1537,9 +1507,7 @@ client.on("messageCreate", async message => {
           .setFooter({ text: `Hosted by ${message.author.tag}` })
           .setTimestamp(Date.now() + ms)
           .setFields({ name: "🎟️ Entries — 0", value: "Nobody yet — be the first!", inline: false });
-        const giveawayAttachment = giveawayImageAttachment();
-        // Attach the banner once; referencing the same file as an embed image makes Discord render it twice.
-        const gMsg = await message.channel.send({ embeds: [embed], components: [row], files: giveawayAttachment ? [giveawayAttachment] : [] });
+        const gMsg = await message.channel.send({ embeds: [embed], components: [row] });
         giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
         scheduleGiveaway(client, gMsg.id, ms);
         await message.reply("✅ Giveaway started!");
@@ -1619,15 +1587,12 @@ client.on("messageCreate", async message => {
           "",
         ];
 
-        const helpAttachment = commandImageAttachment();
         const helpEmbed = new EmbedBuilder()
           .setDescription(helpLines.join("\n"))
           .setColor(0x5865f2)
           .setFooter({ text: ZERO_COMMANDS_BRAND });
-        if (helpAttachment) helpEmbed.setImage("attachment://zerø-commands.gif");
         await message.reply({
           embeds: [helpEmbed],
-          files: helpAttachment ? [helpAttachment] : [],
           allowedMentions: { parse: [] },
         });
         break;
