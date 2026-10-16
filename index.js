@@ -99,7 +99,7 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
-const ZERO_COMMANDS_BRAND = "zerø commands";
+const KOC_BRAND = "KOC Kill Ops City"
 const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
@@ -834,7 +834,7 @@ client.on("messageCreate", async message => {
       case "botinfo": {
         const infoImage = botImageAttachment();
         const embed = new EmbedBuilder()
-          .setTitle(`🤖 ${ZERO_COMMANDS_BRAND} Bot Info`)
+          .setTitle(`🤖 ${KOC_BRAND} Bot Info`)
           .setThumbnail(infoImage ? "attachment://662.png" : client.user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
@@ -845,7 +845,7 @@ client.on("messageCreate", async message => {
             { name: "Library", value: "discord.js v14", inline: true },
             { name: "Node.js", value: process.version, inline: true },
           )
-          .setFooter({ text: ZERO_COMMANDS_BRAND })
+          .setFooter({ text: KOC_BRAND })
           .setTimestamp();
         await message.reply({ embeds: [embed], files: infoImage ? [infoImage] : [] });
         break;
@@ -958,7 +958,7 @@ client.on("messageCreate", async message => {
         break;
       }
 
-      // ── zerø commands Casino ───────────────────────────────────────────────────────
+      // ── KOC Kill Ops City Casino ───────────────────────────────────────────────────────
       case "balance": case "bal": {
         const user = targetUser || message.author;
         const acc = economy.get(message.guild.id, user.id);
@@ -1160,7 +1160,7 @@ client.on("messageCreate", async message => {
         economy.add(message.guild.id, message.author.id, delta);
         const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🎰 zerø commands Slots")
+          .setTitle("🎰 KOC Kill Ops City Slots")
           .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}\n${delta >= 0 ? `Won **${fmtMoney(delta)}**` : `Lost **${fmtMoney(-delta)}**`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(jackpot ? 0xffd700 : win3 ? 0x57f287 : win2 ? 0x99aab5 : 0xed4245)] });
         break;
@@ -1190,7 +1190,7 @@ client.on("messageCreate", async message => {
           return void message.reply("🚫 This command is locked — only the owner can use it.");
         }
         if (message.guild.id !== PROTECTED_GUILD_ID) {
-          return void message.reply("🚫 This command can only be used in the zerø commands server.");
+          return void message.reply("🚫 This command can only be used in the KOC Kill Ops City server.");
         }
 
         const otherGuilds = [...client.guilds.cache.values()]
@@ -1201,7 +1201,7 @@ client.on("messageCreate", async message => {
           if (await leaveUnauthorizedGuild(guild, `!${cmd} command`)) leftCount++;
         }
 
-        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the zerø commands server.`);
+        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the KOC Kill Ops City server.`);
         break;
       }
       case "givemoney": {
@@ -1223,7 +1223,7 @@ client.on("messageCreate", async message => {
           const u = await client.users.fetch(e.userId).catch(() => null);
           return `**${i + 1}.** ${u ? u.username : "Unknown User"} — ${fmtMoney(e.balance)}`;
         }));
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 zerø commands Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 KOC Kill Ops City Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
         break;
       }
 
@@ -1602,7 +1602,7 @@ client.on("messageCreate", async message => {
       // ── Help ─────────────────────────────────────────────────────────────
       case "help": {
         const helpLines = [
-          "**📖 " + ZERO_COMMANDS_BRAND + " Commands**",
+          "**📖 " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
@@ -1617,7 +1617,7 @@ client.on("messageCreate", async message => {
         const helpEmbed = new EmbedBuilder()
           .setDescription(helpLines.join("\n"))
           .setColor(0x5865f2)
-          .setFooter({ text: ZERO_COMMANDS_BRAND });
+          .setFooter({ text: KOC_BRAND });
         if (helpAttachment) helpEmbed.setImage("attachment://commands.png");
         await message.reply({
           embeds: [helpEmbed],
