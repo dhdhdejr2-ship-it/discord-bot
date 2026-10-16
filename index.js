@@ -740,6 +740,164 @@ client.on("messageCreate", async message => {
     switch (cmd) {
 
 
+      case "setrank": {
+        const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
+        if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
+          return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
+        }
+        if (!message.guild.roles.cache.has(moderatorRoleId)) {
+          return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
+        }
+        if (!message.member?.roles.cache.has(moderatorRoleId)) {
+          return void message.reply("⛔ You need the configured moderator role to use !setrank.");
+        }
+
+        const robloxUsername = args[0];
+        const requestedRoleName = args.slice(1).join(" ").trim();
+        if (!robloxUsername || !requestedRoleName) {
+          return void message.reply("Usage: !setrank RobloxUsername Role Name");
+        }
+
+        const apiKey = process.env.ROBLOX_API_KEY?.trim();
+        const groupId = process.env.ROBLOX_GROUP_ID?.trim();
+        const missingConfig = [];
+        if (!apiKey) missingConfig.push("ROBLOX_API_KEY");
+        if (!groupId) missingConfig.push("ROBLOX_GROUP_ID");
+        if (missingConfig.length) {
+          return void message.reply("❌ Set these Railway variables before using this command: " + missingConfig.join(", ") + ".");
+        }
+        if (!/^[0-9]+$/.test(groupId)) {
+          return void message.reply("❌ ROBLOX_GROUP_ID must be the numeric ID of your Roblox group.");
+        }
+
+        let operation = "username lookup";
+        const readRobloxJson = async response => {
+          let payload = {};
+          try { payload = await response.json(); } catch {}
+          if (!response.ok) {
+            const error = new Error("Roblox API request failed");
+            error.status = response.status;
+            throw error;
+          }
+          return payload;
+        };
+        const openCloudRequest = async (url, options = {}) => {
+          const response = await fetch(url, {
+            ...options,
+            headers: { ...(options.headers || {}), "x-api-key": apiKey },
+          });
+          return readRobloxJson(response);
+        };
+        const listAll = async (path, collectionName, pageSize, filter) => {
+          const results = [];
+          let pageToken = "";
+          for (let page = 0; page < 100; page += 1) {
+            const query = new URLSearchParams({ maxPageSize: String(pageSize) });
+            if (filter) query.set("filter", filter);
+            if (pageToken) query.set("pageToken", pageToken);
+            const response = await openCloudRequest(path + "?" + query.toString());
+            if (Array.isArray(response[collectionName])) results.push(...response[collectionName]);
+            const nextPageToken = response.nextPageToken;
+            if (!nextPageToken) return results;
+            if (nextPageToken === pageToken) throw new Error("Roblox returned a repeated pagination token");
+            pageToken = nextPageToken;
+          }
+          throw new Error("Roblox returned too many result pages");
+        };
+
+        try {
+          operation = "username lookup";
+          const userResponse = await fetch("https://users.roblox.com/v1/usernames/users", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ usernames: [robloxUsername], excludeBannedUsers: false }),
+          });
+          const userLookup = await readRobloxJson(userResponse);
+          const robloxUser = Array.isArray(userLookup.data) ? userLookup.data.find(user => user && user.id != null) : null;
+          if (!robloxUser) {
+            return void message.reply("❌ I couldn't find the Roblox username **" + robloxUsername + "**.");
+          }
+
+          operation = "group membership and role lookup";
+          const groupPath = "https://apis.roblox.com/cloud/v2/groups/" + encodeURIComponent(groupId);
+          const userFilter = "user == 'users/" + robloxUser.id + "'";
+          const [groupRoles, memberships] = await Promise.all([
+            listAll(groupPath + "/roles", "groupRoles", 20),
+            listAll(groupPath + "/memberships", "groupMemberships", 100, userFilter),
+          ]);
+          const targetRole = groupRoles.find(role => role && role.displayName === requestedRoleName);
+          if (!targetRole || !targetRole.path) {
+            return void message.reply("❌ I couldn't find a Roblox group role named exactly **" + requestedRoleName + "**.");
+          }
+          const membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
+          if (!membership) {
+            return void message.reply("❌ **" + (robloxUser.name || robloxUsername) + "** is not a member of the configured Roblox group.");
+          }
+          const membershipPath = typeof membership.path === "string" ? membership.path : "";
+          const membershipMatch = membershipPath.match(new RegExp("^groups/" + groupId + "/memberships/([^/]+)$"));
+          if (!membershipMatch) throw new Error("Roblox returned an invalid membership resource path");
+          const membershipId = membershipMatch[1];
+          const previousRolePath = typeof membership.role === "string"
+            ? membership.role
+            : (Array.isArray(membership.roles) ? membership.roles.find(role => typeof role === "string") : null);
+          const previousRole = groupRoles.find(role => role && role.path === previousRolePath);
+
+          operation = "role assignment";
+          await openCloudRequest(groupPath + "/memberships/" + encodeURIComponent(membershipId) + ":assignRole", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ role: targetRole.path }),
+          });
+
+          if (previousRolePath && previousRolePath !== targetRole.path) {
+            try {
+              await openCloudRequest(groupPath + "/memberships/" + encodeURIComponent(membershipId) + ":unassignRole", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ role: previousRolePath }),
+              });
+            } catch (cleanupError) {
+              const status = Number(cleanupError?.status || 0);
+              console.error("[setrank] New role assigned, but prior role cleanup failed" + (status ? " (HTTP " + status + ")" : ""));
+              const cleanupHelp = status === 403
+                ? "Check the Roblox API key's group:write access and the key owner's role permissions."
+                : status === 429
+                  ? "Roblox rate-limited removal of the previous role; check the member's roles and retry."
+                  : "Check the member's roles and Roblox group:write access before retrying.";
+              return void message.reply("⚠️ Roblox assigned **" + targetRole.displayName + "** to **" + (robloxUser.name || robloxUsername) + "**, but couldn't remove the previous rank" + (previousRole?.displayName ? " (" + previousRole.displayName + ")" : "") + ". The user may temporarily hold both roles. " + cleanupHelp);
+            }
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle("✅ Roblox Rank Changed")
+            .setColor(0x57f287)
+            .addFields(
+              { name: "Roblox Username", value: robloxUser.name || robloxUsername, inline: true },
+              { name: "Previous Rank", value: previousRole?.displayName || "Unknown", inline: true },
+              { name: "New Rank", value: targetRole.displayName, inline: true },
+              { name: "Moderator", value: message.author.tag + " (<@" + message.author.id + ">)" },
+            )
+            .setTimestamp();
+          await message.reply({ embeds: [embed], allowedMentions: { parse: [] } });
+        } catch (error) {
+          const status = Number(error?.status || 0);
+          console.error("[setrank] Roblox " + operation + " failed" + (status ? " (HTTP " + status + ")" : ""));
+          const explanation = status === 401 || status === 403
+            ? "Roblox denied access. Verify ROBLOX_API_KEY has group:read and group:write access to this group, and that the key owner can assign the requested rank."
+            : status === 429
+              ? "Roblox rate-limited the request. Please try again shortly."
+              : status === 404
+                ? "Roblox couldn't find the configured group or membership. Check ROBLOX_GROUP_ID and confirm the user is still in the group."
+                : status
+                  ? "Roblox returned HTTP " + status + ". Check the group ID, role permissions, and API key access."
+                  : error?.name === "TypeError"
+                    ? "I couldn't connect to Roblox. Please try again shortly."
+                    : "Roblox returned an unexpected response. Verify the API key and group permissions, then try again.";
+          await message.reply("❌ " + explanation).catch(() => {});
+        }
+        break;
+      }
+
       case "react": {
         if (message.author.id !== OWNER_ID) {
           return void message.reply("🚫 This command is locked — only the bot owner can use it.");
@@ -1608,7 +1766,7 @@ client.on("messageCreate", async message => {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge`",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
         ];
