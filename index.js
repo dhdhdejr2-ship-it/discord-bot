@@ -275,23 +275,18 @@ function resumeReminders(client) {
   }
 }
 
-// ─── Shared bot image ───────────────────────────────────────────────────────
-// All static bot panels use the uploaded GIF below.
-const BOT_IMAGE_PATH = path.join(__dirname, "assets", "bot.gif");
-function botImageAttachment() {
-  if (!fs.existsSync(BOT_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(BOT_IMAGE_PATH, { name: "bot.gif" });
+// ─── Static bot images ──────────────────────────────────────────────────────
+function imageAttachment(filename) {
+  const imagePath = path.join(__dirname, "assets", filename);
+  if (!fs.existsSync(imagePath)) return null;
+  return new AttachmentBuilder(imagePath, { name: filename });
 }
 
-const COMMAND_IMAGE_PATH = path.join(__dirname, "assets", "commands.gif");
-function commandImageAttachment() {
-  if (!fs.existsSync(COMMAND_IMAGE_PATH)) return null;
-  return new AttachmentBuilder(COMMAND_IMAGE_PATH, { name: "zerø-commands.gif" });
-}
-
-function welcomeImageAttachment() { return botImageAttachment(); }
-function leaveImageAttachment() { return botImageAttachment(); }
-function giveawayImageAttachment() { return botImageAttachment(); }
+function botImageAttachment() { return imageAttachment("662.png"); }
+function commandImageAttachment() { return imageAttachment("commands.png"); }
+function welcomeImageAttachment() { return imageAttachment("welcome.png"); }
+function leaveImageAttachment() { return imageAttachment("leave.png"); }
+function giveawayImageAttachment() { return imageAttachment("giveaway.png"); }
 function resumeGiveaways(client) {
   for (const g of giveaways.all()) {
     if (g.ended || g.ending) continue;
@@ -576,7 +571,7 @@ client.on("guildMemberAdd", async member => {
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = welcomeImageAttachment();
     const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://bot.gif");
+    if (attachment) embed.setImage("attachment://welcome.png");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Welcome error:", e); }
 });
@@ -598,7 +593,7 @@ client.on("guildMemberRemove", async member => {
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = leaveImageAttachment();
     const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
-    if (attachment) embed.setImage("attachment://bot.gif");
+    if (attachment) embed.setImage("attachment://leave.png");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Leave error:", e); }
 });
@@ -840,7 +835,7 @@ client.on("messageCreate", async message => {
         const infoImage = botImageAttachment();
         const embed = new EmbedBuilder()
           .setTitle(`🤖 ${ZERO_COMMANDS_BRAND} Bot Info`)
-          .setThumbnail(infoImage ? "attachment://bot.gif" : client.user.displayAvatarURL({ size: 256 }))
+          .setThumbnail(infoImage ? "attachment://662.png" : client.user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
             { name: "Uptime", value: formatUptime(Date.now() - startTime), inline: true },
@@ -1078,9 +1073,8 @@ client.on("messageCreate", async message => {
             return void message.reply("❌ I need **Manage Expressions** permission to add emojis to this server.");
           }
 
-          const [, animatedFlag, emojiName, emojiId] = customEmoji;
-          const extension = animatedFlag ? "gif" : "png";
-          const emojiUrl = "https://cdn.discordapp.com/emojis/" + emojiId + "." + extension + "?size=128&quality=lossless";
+          const [, , emojiName, emojiId] = customEmoji;
+          const emojiUrl = "https://cdn.discordapp.com/emojis/" + emojiId + ".png?size=128&quality=lossless";
           const requestedName = args[1] || emojiName;
           const safeName = requestedName.replace(/[^\w~]/g, "").slice(0, 32);
           if (!safeName) {
@@ -1327,7 +1321,7 @@ client.on("messageCreate", async message => {
         const ch = await client.channels.fetch(chId);
         const previewAttachment = welcomeImageAttachment();
         const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
+        if (previewAttachment) previewEmbed.setImage("attachment://welcome.png");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
         await message.reply("✅ Preview sent!");
         break;
@@ -1350,7 +1344,7 @@ client.on("messageCreate", async message => {
         const ch = await client.channels.fetch(chId);
         const previewAttachment = leaveImageAttachment();
         const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
-        if (previewAttachment) previewEmbed.setImage("attachment://bot.gif");
+        if (previewAttachment) previewEmbed.setImage("attachment://leave.png");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
         await message.reply("✅ Preview sent!");
         break;
@@ -1624,7 +1618,7 @@ client.on("messageCreate", async message => {
           .setDescription(helpLines.join("\n"))
           .setColor(0x5865f2)
           .setFooter({ text: ZERO_COMMANDS_BRAND });
-        if (helpAttachment) helpEmbed.setImage("attachment://zerø-commands.gif");
+        if (helpAttachment) helpEmbed.setImage("attachment://commands.png");
         await message.reply({
           embeds: [helpEmbed],
           files: helpAttachment ? [helpAttachment] : [],
