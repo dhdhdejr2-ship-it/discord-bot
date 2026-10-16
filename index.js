@@ -771,6 +771,7 @@ client.on("messageCreate", async message => {
         }
 
         let operation = "username lookup";
+        let acceptedJoinRequest = false;
         const readRobloxJson = async response => {
           let payload = {};
           try { payload = await response.json(); } catch {}
@@ -829,9 +830,37 @@ client.on("messageCreate", async message => {
           if (!targetRole || !targetRole.path) {
             return void message.reply("❌ I couldn't find a Roblox group role named exactly **" + requestedRoleName + "**.");
           }
-          const membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
+          let membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
           if (!membership) {
-            return void message.reply("❌ **" + (robloxUser.name || robloxUsername) + "** is not a member of the configured Roblox group.");
+            operation = "pending join request lookup";
+            const joinRequests = await listAll(groupPath + "/join-requests", "groupJoinRequests", 20, userFilter);
+            const pendingRequest = joinRequests.find(entry => entry && entry.user === "users/" + robloxUser.id);
+            if (!pendingRequest) {
+              return void message.reply("❌ **" + (robloxUser.name || robloxUsername) + "** is not a member and has no pending join request in the configured Roblox group.");
+            }
+
+            const requestPath = typeof pendingRequest.path === "string" ? pendingRequest.path : "";
+            const requestMatch = requestPath.match(new RegExp("^groups/" + groupId + "/join-requests/([^/]+)$"));
+            if (!requestMatch) throw new Error("Roblox returned an invalid join request resource path");
+
+            operation = "accepting pending join request";
+            await openCloudRequest(groupPath + "/join-requests/" + encodeURIComponent(requestMatch[1]) + ":accept", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            });
+            acceptedJoinRequest = true;
+
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+              operation = "membership lookup after accepting join request";
+              const acceptedMemberships = await listAll(groupPath + "/memberships", "groupMemberships", 100, userFilter);
+              membership = acceptedMemberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
+              if (membership) break;
+              if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            if (!membership) {
+              return void message.reply("✅ Accepted the join request for **" + (robloxUser.name || robloxUsername) + "**, but Roblox has not made the membership available yet. Run the same !setrank command again in a few seconds to assign the role.");
+            }
           }
           const membershipPath = typeof membership.path === "string" ? membership.path : "";
           const membershipMatch = membershipPath.match(new RegExp("^groups/" + groupId + "/memberships/([^/]+)$"));
@@ -869,7 +898,7 @@ client.on("messageCreate", async message => {
           }
 
           const embed = new EmbedBuilder()
-            .setTitle("✅ Roblox Rank Changed")
+            .setTitle(acceptedJoinRequest ? "✅ Roblox Request Accepted & Ranked" : "✅ Roblox Rank Changed")
             .setColor(0x57f287)
             .addFields(
               { name: "Roblox Username", value: robloxUser.name || robloxUsername, inline: true },
@@ -893,7 +922,10 @@ client.on("messageCreate", async message => {
                   : error?.name === "TypeError"
                     ? "I couldn't connect to Roblox. Please try again shortly."
                     : "Roblox returned an unexpected response. Verify the API key and group permissions, then try again.";
-          await message.reply("❌ " + explanation).catch(() => {});
+          const acceptedNote = acceptedJoinRequest
+            ? " The join request was accepted, but role assignment did not finish. Run the same command again to retry the rank."
+            : "";
+          await message.reply("❌ " + explanation + acceptedNote).catch(() => {});
         }
         break;
       }
