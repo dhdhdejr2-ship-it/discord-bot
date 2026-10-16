@@ -99,7 +99,7 @@ function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
-const KOC_BRAND = "KOC Kill Ops City"
+const KOC_BRAND = "KOC Kill Ops City";
 const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
 const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
