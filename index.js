@@ -755,7 +755,7 @@ client.on("messageCreate", async message => {
         const robloxUsername = args[0];
         const requestedRoleName = args.slice(1).join(" ").trim();
         if (!robloxUsername || !requestedRoleName) {
-          return void message.reply("Usage: !setrank RobloxUsername Role Name");
+          return void message.reply("Usage: !setrank RobloxUsername Rank Name\nExample: !setrank RobloxUsername free access (case-insensitive; a unique part works).");
         }
 
         const apiKey = process.env.ROBLOX_API_KEY?.trim();
@@ -826,10 +826,47 @@ client.on("messageCreate", async message => {
             listAll(groupPath + "/roles", "groupRoles", 20),
             listAll(groupPath + "/memberships", "groupMemberships", 100, userFilter),
           ]);
-          const targetRole = groupRoles.find(role => role && role.displayName === requestedRoleName);
-          if (!targetRole || !targetRole.path) {
-            return void message.reply("❌ I couldn't find a Roblox group role named exactly **" + requestedRoleName + "**.");
+          const normalizeRoleName = value => String(value || "")
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+          const normalizedRequestedRoleName = normalizeRoleName(requestedRoleName);
+          let roleMatches = [];
+          if (normalizedRequestedRoleName) {
+            const exactMatches = groupRoles.filter(role =>
+              role &&
+              role.path &&
+              normalizeRoleName(role.displayName) === normalizedRequestedRoleName
+            );
+            roleMatches = exactMatches.length
+              ? exactMatches
+              : groupRoles.filter(role => {
+                  if (!role || !role.path) return false;
+                  const normalizedRoleName = normalizeRoleName(role.displayName);
+                  return normalizedRoleName &&
+                    (" " + normalizedRoleName + " ").includes(" " + normalizedRequestedRoleName + " ");
+                });
           }
+          if (roleMatches.length > 1) {
+            const choices = roleMatches
+              .slice(0, 5)
+              .map(role => "• " + String(role.displayName || "Unnamed role"))
+              .join("\n");
+            const more = roleMatches.length > 5 ? "\n• …" : "";
+            return void message.reply({
+              content: "❓ That name matches multiple Roblox ranks. Use a more specific name:\n" + choices + more,
+              allowedMentions: { parse: [] },
+            });
+          }
+          if (!roleMatches.length) {
+            return void message.reply({
+              content: "❌ I couldn't find a Roblox group role matching that name. Try the full rank name or a unique part, like free access.",
+              allowedMentions: { parse: [] },
+            });
+          }
+          const targetRole = roleMatches[0];
           let membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
           if (!membership) {
             operation = "pending join request lookup";
