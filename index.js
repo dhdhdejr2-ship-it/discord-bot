@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AuditLogEvent, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, AuditLogEvent, AutoModerationRuleEventType, AutoModerationRuleTriggerType, AutoModerationActionType, AutoModerationRuleKeywordPresetType, ApplicationCommandType, ApplicationCommandOptionType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -302,6 +302,38 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+async function registerSetRankSlashCommand(application) {
+  const commandData = {
+    type: ApplicationCommandType.ChatInput,
+    name: "setrank",
+    description: "Change a Roblox group member's rank.",
+    options: [
+      {
+        type: ApplicationCommandOptionType.String,
+        name: "roblox_username",
+        description: "The Roblox username to rank.",
+        required: true,
+      },
+      {
+        type: ApplicationCommandOptionType.String,
+        name: "role_name",
+        description: "The exact Roblox group role name.",
+        required: true,
+      },
+    ],
+  };
+  const commands = await application.commands.fetch();
+  const existingCommand = commands.find(command =>
+    command.name === "setrank" && command.type === ApplicationCommandType.ChatInput
+  );
+  if (existingCommand) {
+    await application.commands.edit(existingCommand.id, commandData);
+  } else {
+    await application.commands.create(commandData);
+  }
+  console.log("✅ Registered /setrank slash command.");
+}
+
 function markBotActive() {
   if (!client.user) return;
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
@@ -543,6 +575,11 @@ client.once("clientReady", async c => {
   console.log(`✅ Logged in as ${c.user.tag}`);
   markBotActive();
   setInterval(markBotActive, 60 * 1000);
+  try {
+    await registerSetRankSlashCommand(c.application);
+  } catch (error) {
+    console.error("❌ Could not register /setrank slash command:", error);
+  }
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
@@ -649,6 +686,29 @@ client.on("messageCreate", async message => {
 
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
+  if (interaction.isChatInputCommand() && interaction.commandName === "setrank") {
+    if (!interaction.guild) {
+      return interaction.reply({ content: "Use /setrank in a server.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) {
+      return interaction.editReply("❌ I couldn't find your member record in this server.");
+    }
+    const message = {
+      author: interaction.user,
+      guild: interaction.guild,
+      member,
+      content: "!setrank " + interaction.options.getString("roblox_username", true) + " " + interaction.options.getString("role_name", true),
+      attachments: { size: 0 },
+      embeds: [],
+      mentions: { users: { first: () => null } },
+      reply: payload => interaction.editReply(payload),
+    };
+    await handleCommandMessage(message);
+    return;
+  }
+
   // ── Giveaway button ──
 
 
@@ -711,7 +771,7 @@ client.on("interactionCreate", async interaction => {
 });
 
 // ─── Commands ───────────────────────────────────────────────────────────────
-client.on("messageCreate", async message => {
+async function handleCommandMessage(message) {
   if (message.author.bot || !message.guild) return;
   if (!message.content) {
     if (!message.attachments.size && !message.embeds.length) {
@@ -749,13 +809,13 @@ client.on("messageCreate", async message => {
           return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
         }
         if (!message.member?.roles.cache.has(moderatorRoleId)) {
-          return void message.reply("⛔ You need the configured moderator role to use !setrank.");
+          return void message.reply("⛔ You need the configured moderator role to use !setrank or /setrank.");
         }
 
         const robloxUsername = args[0];
         const requestedRoleName = args.slice(1).join(" ").trim();
         if (!robloxUsername || !requestedRoleName) {
-          return void message.reply("Usage: !setrank RobloxUsername Role Name");
+          return void message.reply("Usage: !setrank RobloxUsername Rank Name\nExample: !setrank RobloxUsername free access (case-insensitive; a unique part works), or use /setrank.");
         }
 
         const apiKey = process.env.ROBLOX_API_KEY?.trim();
@@ -826,10 +886,47 @@ client.on("messageCreate", async message => {
             listAll(groupPath + "/roles", "groupRoles", 20),
             listAll(groupPath + "/memberships", "groupMemberships", 100, userFilter),
           ]);
-          const targetRole = groupRoles.find(role => role && role.displayName === requestedRoleName);
-          if (!targetRole || !targetRole.path) {
-            return void message.reply("❌ I couldn't find a Roblox group role named exactly **" + requestedRoleName + "**.");
+          const normalizeRoleName = value => String(value || "")
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+          const normalizedRequestedRoleName = normalizeRoleName(requestedRoleName);
+          let roleMatches = [];
+          if (normalizedRequestedRoleName) {
+            const exactMatches = groupRoles.filter(role =>
+              role &&
+              role.path &&
+              normalizeRoleName(role.displayName) === normalizedRequestedRoleName
+            );
+            roleMatches = exactMatches.length
+              ? exactMatches
+              : groupRoles.filter(role => {
+                  if (!role || !role.path) return false;
+                  const normalizedRoleName = normalizeRoleName(role.displayName);
+                  return normalizedRoleName &&
+                    (" " + normalizedRoleName + " ").includes(" " + normalizedRequestedRoleName + " ");
+                });
           }
+          if (roleMatches.length > 1) {
+            const choices = roleMatches
+              .slice(0, 5)
+              .map(role => "• " + String(role.displayName || "Unnamed role"))
+              .join("\n");
+            const more = roleMatches.length > 5 ? "\n• …" : "";
+            return void message.reply({
+              content: "❓ That name matches multiple Roblox ranks. Use a more specific name:\n" + choices + more,
+              allowedMentions: { parse: [] },
+            });
+          }
+          if (!roleMatches.length) {
+            return void message.reply({
+              content: "❌ I couldn't find a Roblox group role matching that name. Try the full rank name or a unique part, like free access.",
+              allowedMentions: { parse: [] },
+            });
+          }
+          const targetRole = roleMatches[0];
           let membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
           if (!membership) {
             operation = "pending join request lookup";
@@ -859,7 +956,7 @@ client.on("messageCreate", async message => {
               if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 500));
             }
             if (!membership) {
-              return void message.reply("✅ Accepted the join request for **" + (robloxUser.name || robloxUsername) + "**, but Roblox has not made the membership available yet. Run the same !setrank command again in a few seconds to assign the role.");
+              return void message.reply("✅ Accepted the join request for **" + (robloxUser.name || robloxUsername) + "**, but Roblox has not made the membership available yet. Run !setrank or /setrank again in a few seconds to assign the role.");
             }
           }
           const membershipPath = typeof membership.path === "string" ? membership.path : "";
@@ -1798,7 +1895,7 @@ client.on("messageCreate", async message => {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>`",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank`",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
         ];
@@ -1826,7 +1923,8 @@ client.on("messageCreate", async message => {
       : `The command failed (error code ${errorCode}).`;
     await message.reply(`❌ !${cmd} failed. ${reason}`).catch(()=>{});
   }
-});
+}
+client.on("messageCreate", handleCommandMessage);
 
 // ─── Dashboard HTTP API ─────────────────────────────────────────────────────
 const dashApp = express();
