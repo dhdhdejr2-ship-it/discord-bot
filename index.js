@@ -317,8 +317,9 @@ async function registerSetRankSlashCommand(application) {
       {
         type: ApplicationCommandOptionType.String,
         name: "role_name",
-        description: "The exact Roblox group role name.",
+        description: "Pick a Roblox group role. Type to filter the list.",
         required: true,
+        autocomplete: true,
       },
     ],
   };
@@ -332,6 +333,92 @@ async function registerSetRankSlashCommand(application) {
     await application.commands.create(commandData);
   }
   console.log("✅ Registered /setrank slash command.");
+}
+
+const SETRANK_ROLE_CACHE_TTL_MS = 60 * 1000;
+let setRankRoleNamesCache = { groupId: null, expiresAt: 0, roles: [] };
+let setRankRoleNamesRequest = null;
+
+function normalizeSetRankRoleChoice(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function getSetRankRoleNames() {
+  const apiKey = process.env.ROBLOX_API_KEY?.trim();
+  const groupId = process.env.ROBLOX_GROUP_ID?.trim();
+  if (!apiKey || !groupId || !/^[0-9]+$/.test(groupId)) return [];
+
+  if (setRankRoleNamesCache.groupId === groupId && Date.now() < setRankRoleNamesCache.expiresAt) {
+    return setRankRoleNamesCache.roles;
+  }
+  if (setRankRoleNamesRequest?.groupId === groupId) {
+    return setRankRoleNamesRequest.promise;
+  }
+
+  const promise = (async () => {
+    const roles = [];
+    let pageToken = "";
+    const groupPath = "https://apis.roblox.com/cloud/v2/groups/" + encodeURIComponent(groupId) + "/roles";
+    for (let page = 0; page < 100; page += 1) {
+      const query = new URLSearchParams({ maxPageSize: "20" });
+      if (pageToken) query.set("pageToken", pageToken);
+      const response = await fetch(groupPath + "?" + query.toString(), {
+        headers: { "x-api-key": apiKey },
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch {}
+      if (!response.ok) {
+        const error = new Error("Roblox role lookup failed");
+        error.status = response.status;
+        throw error;
+      }
+      if (Array.isArray(payload.groupRoles)) roles.push(...payload.groupRoles);
+      const nextPageToken = payload.nextPageToken;
+      if (!nextPageToken) {
+        return roles
+          .filter(role => role && typeof role.displayName === "string" && role.displayName.trim())
+          .map(role => role.displayName.trim());
+      }
+      if (nextPageToken === pageToken) throw new Error("Roblox returned a repeated role pagination token");
+      pageToken = nextPageToken;
+    }
+    throw new Error("Roblox returned too many role pages");
+  })();
+  setRankRoleNamesRequest = { groupId, promise };
+  try {
+    const roles = await promise;
+    if (setRankRoleNamesRequest?.promise === promise) {
+      setRankRoleNamesCache = { groupId, expiresAt: Date.now() + SETRANK_ROLE_CACHE_TTL_MS, roles };
+    }
+    return roles;
+  } finally {
+    if (setRankRoleNamesRequest?.promise === promise) setRankRoleNamesRequest = null;
+  }
+}
+
+function buildSetRankRoleChoices(roleNames, focusedValue) {
+  const normalizedQuery = normalizeSetRankRoleChoice(focusedValue);
+  const seen = new Set();
+  const matches = [];
+  for (const roleNameValue of Array.isArray(roleNames) ? roleNames : []) {
+    const name = String(roleNameValue || "").trim();
+    if (!name || name.length > 100 || seen.has(name)) continue;
+    seen.add(name);
+    const normalizedName = normalizeSetRankRoleChoice(name);
+    if (normalizedQuery && !normalizedName.includes(normalizedQuery)) continue;
+    const score = !normalizedQuery ? 0
+      : normalizedName === normalizedQuery ? 0
+        : normalizedName.startsWith(normalizedQuery) ? 1
+          : 2;
+    matches.push({ name, score });
+  }
+  matches.sort((a, b) => a.score - b.score);
+  return matches.slice(0, 25).map(({ name }) => ({ name, value: name }));
 }
 
 function markBotActive() {
@@ -686,6 +773,29 @@ client.on("messageCreate", async message => {
 
 // ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
 client.on("interactionCreate", async interaction => {
+  if (interaction.isAutocomplete() && interaction.commandName === "setrank") {
+    if (!interaction.guild) return interaction.respond([]);
+    const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
+    const memberRoles = interaction.member?.roles;
+    const hasModeratorRole = Array.isArray(memberRoles)
+      ? memberRoles.includes(moderatorRoleId)
+      : Boolean(memberRoles?.cache?.has(moderatorRoleId));
+    if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId) || !hasModeratorRole) {
+      return interaction.respond([]);
+    }
+    const focusedOption = interaction.options.getFocused(true);
+    if (focusedOption.name !== "role_name") return interaction.respond([]);
+    try {
+      const roleNames = await getSetRankRoleNames();
+      await interaction.respond(buildSetRankRoleChoices(roleNames, focusedOption.value));
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      console.error("[setrank] Roblox role suggestions unavailable" + (status ? " (HTTP " + status + ")" : ""));
+      await interaction.respond([]).catch(() => {});
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand() && interaction.commandName === "setrank") {
     if (!interaction.guild) {
       return interaction.reply({ content: "Use /setrank in a server.", ephemeral: true });
@@ -1895,7 +2005,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank`",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
         ];
