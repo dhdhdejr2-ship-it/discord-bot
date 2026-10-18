@@ -302,6 +302,18 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+function buildWeeklyRequirementsEmbed() {
+  return new EmbedBuilder()
+    .setTitle("📋 Weekly Requirements")
+    .setDescription("PING 4 HELP (youssef)\n\nStatus: ⚠️ Requirements Not Met")
+    .setColor(0x2b2d31)
+    .addFields(
+      { name: "🎟️ Tickets", value: "34/10 ✅", inline: false },
+      { name: "🚀 Deployments", value: "0/5 ❌", inline: false },
+      { name: "⭐ Vouchers", value: "15/5 ✅", inline: false },
+      { name: "📊 Progress", value: "2/3 requirements completed", inline: false },
+    );
+}
 async function registerSetRankSlashCommand(application) {
   const commandData = {
     type: ApplicationCommandType.ChatInput,
@@ -335,6 +347,23 @@ async function registerSetRankSlashCommand(application) {
   console.log("✅ Registered /setrank slash command.");
 }
 
+async function registerWeeklyRequirementsSlashCommand(application) {
+  const commandData = {
+    type: ApplicationCommandType.ChatInput,
+    name: "requirements",
+    description: "Show weekly requirements.",
+  };
+  const commands = await application.commands.fetch();
+  const existingCommand = commands.find(command =>
+    command.name === "requirements" && command.type === ApplicationCommandType.ChatInput
+  );
+  if (existingCommand) {
+    await application.commands.edit(existingCommand.id, commandData);
+  } else {
+    await application.commands.create(commandData);
+  }
+  console.log("✅ Registered /requirements slash command.");
+}
 const SETRANK_ROLE_CACHE_TTL_MS = 60 * 1000;
 let setRankRoleNamesCache = { groupId: null, expiresAt: 0, roles: [] };
 let setRankRoleNamesRequest = null;
@@ -667,6 +696,11 @@ client.once("clientReady", async c => {
   } catch (error) {
     console.error("❌ Could not register /setrank slash command:", error);
   }
+  try {
+    await registerWeeklyRequirementsSlashCommand(c.application);
+  } catch (error) {
+    console.error("❌ Could not register /requirements slash command:", error);
+  }
   resumeGiveaways(client);
   resumeReminders(client);
   await enforceGuildAllowlist();
@@ -796,6 +830,11 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
+  if (interaction.isChatInputCommand() && interaction.commandName === "requirements") {
+    await interaction.reply({ embeds: [buildWeeklyRequirementsEmbed()] });
+    return;
+  }
+
   if (interaction.isChatInputCommand() && interaction.commandName === "setrank") {
     if (!interaction.guild) {
       return interaction.reply({ content: "Use /setrank in a server.", ephemeral: true });
@@ -909,6 +948,10 @@ async function handleCommandMessage(message) {
   try {
     switch (cmd) {
 
+
+      case "requirements": {
+        return void message.reply({ embeds: [buildWeeklyRequirementsEmbed()] });
+      }
 
       case "setrank": {
         const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
