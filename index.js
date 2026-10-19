@@ -338,6 +338,24 @@ function buildWeeklyRequirementsEmbed(member) {
     .setFooter({ text: "FTL Staff Tracker • Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
     .setTimestamp();
 }
+
+function buildRequirementAddComponents(userId) {
+  const choices = [
+    { type: "tickets", label: "1. Ticket +1" },
+    { type: "deployments", label: "2. Deployment +1" },
+    { type: "vouches", label: "3. Vouch +1" },
+  ];
+  const row = new ActionRowBuilder().addComponents(
+    choices.map(choice =>
+      new ButtonBuilder()
+        .setCustomId("rq:add:" + userId + ":" + choice.type)
+        .setLabel(choice.label)
+        .setStyle(ButtonStyle.Primary)
+    )
+  );
+  return [row];
+}
+
 async function registerSetRankSlashCommand(application) {
   const commandData = {
     type: ApplicationCommandType.ChatInput,
@@ -371,28 +389,32 @@ async function registerSetRankSlashCommand(application) {
   console.log("✅ Registered /setrank slash command.");
 }
 
-async function registerWeeklyRequirementsSlashCommand(application) {
+async function registerRequirementsSlashCommand(application) {
   const commandData = {
     type: ApplicationCommandType.ChatInput,
-    name: "requirements",
-    description: "Show weekly requirements for you or a staff member.",
+    name: "rq",
+    description: "Add to your weekly staff requirements.",
     options: [{
-      type: ApplicationCommandOptionType.User,
-      name: "staff_member",
-      description: "Staff member to view; defaults to yourself.",
-      required: false,
+      type: ApplicationCommandOptionType.Subcommand,
+      name: "add",
+      description: "Add one ticket, deployment, or vouch to your weekly total.",
     }],
   };
   const commands = await application.commands.fetch();
+  for (const command of commands.values()) {
+    if (command.name === "requirements" && command.type === ApplicationCommandType.ChatInput) {
+      await application.commands.delete(command.id);
+    }
+  }
   const existingCommand = commands.find(command =>
-    command.name === "requirements" && command.type === ApplicationCommandType.ChatInput
+    command.name === "rq" && command.type === ApplicationCommandType.ChatInput
   );
   if (existingCommand) {
     await application.commands.edit(existingCommand.id, commandData);
   } else {
     await application.commands.create(commandData);
   }
-  console.log("✅ Registered /requirements slash command.");
+  console.log("✅ Registered /rq add and removed the old /requirements slash command.");
 }
 const SETRANK_ROLE_CACHE_TTL_MS = 60 * 1000;
 let setRankRoleNamesCache = { groupId: null, expiresAt: 0, roles: [] };
@@ -727,9 +749,9 @@ client.once("clientReady", async c => {
     console.error("❌ Could not register /setrank slash command:", error);
   }
   try {
-    await registerWeeklyRequirementsSlashCommand(c.application);
+    await registerRequirementsSlashCommand(c.application);
   } catch (error) {
-    console.error("❌ Could not register /requirements slash command:", error);
+    console.error("❌ Could not register /rq add slash command:", error);
   }
   resumeGiveaways(client);
   resumeReminders(client);
@@ -786,7 +808,7 @@ client.on("guildMemberRemove", async member => {
   } catch(e) { console.error("Leave error:", e); }
 });
 
-// ─── Weekly requirements activity tracking ──────────────────────────────────
+// ─── Weekly requirements access ──────────────────────────────────────────────
 function isRequirementsStaff(member) {
   if (!member || member.user?.bot) return false;
   const configuredRoleIds = (process.env.STAFF_ROLE_IDS || process.env.MOD_ROLE_ID || "")
@@ -807,70 +829,6 @@ function isRequirementsStaff(member) {
     normalizeSetRankRoleChoice(role.name).split(/\s+/).some(word => staffRoleWords.has(word))
   );
 }
-
-async function fetchRequirementsMember(guild, userId) {
-  return guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
-}
-
-async function trackRequirementsMessage(message) {
-  if (!message.guild || message.author.bot || message.author.id === client.user?.id || message.webhookId) return;
-  const content = String(message.content || "").trim();
-  if (content.startsWith(PREFIX)) return;
-  if (!content && !message.attachments?.size && !message.embeds?.length) return;
-
-  const channel = message.channel;
-  const member = message.member || await fetchRequirementsMember(message.guild, message.author.id);
-  if (
-    member && isRequirementsStaff(member) &&
-    weeklyRequirements.channelMatchesActivity(channel, "ticket")
-  ) {
-    requirementsTracker.recordEvent({
-      key: "ticket:" + message.guild.id + ":" + channel.id + ":" + member.id,
-      type: "tickets",
-      guildId: message.guild.id,
-      userId: member.id,
-      sourceId: channel.id,
-      createdAt: message.createdTimestamp,
-    });
-  }
-
-  if (!weeklyRequirements.channelMatchesActivity(channel, "vouch")) return;
-  for (const userId of message.mentions.users.keys()) {
-    if (userId === message.author.id) continue;
-    const targetMember = message.mentions.members?.get(userId) || await fetchRequirementsMember(message.guild, userId);
-    if (!isRequirementsStaff(targetMember)) continue;
-    requirementsTracker.recordEvent({
-      key: "vouch:" + message.guild.id + ":" + message.id + ":" + userId,
-      type: "vouches",
-      guildId: message.guild.id,
-      userId,
-      sourceId: channel.id,
-      createdAt: message.createdTimestamp,
-    });
-  }
-}
-
-client.on("messageCreate", message => {
-  void trackRequirementsMessage(message).catch(error => {
-    console.error("[requirements] Could not record message activity:", error);
-  });
-});
-
-client.on("voiceStateUpdate", (oldState, newState) => {
-  const member = newState.member || oldState.member;
-  if (!member || !newState.channel || newState.channelId === oldState.channelId) return;
-  if (!weeklyRequirements.channelMatchesActivity(newState.channel, "deployment")) return;
-  if (weeklyRequirements.channelMatchesActivity(oldState.channel, "deployment")) return;
-  if (!isRequirementsStaff(member)) return;
-  requirementsTracker.recordEvent({
-    key: "deployment:" + member.guild.id + ":" + member.id + ":" + newState.channelId + ":" + (newState.sessionId || Date.now()),
-    type: "deployments",
-    guildId: member.guild.id,
-    userId: member.id,
-    sourceId: newState.channelId,
-    createdAt: Date.now(),
-  });
-});
 
 // ─── Snipe: track deleted messages ─────────────────────────────────────────
 client.on("messageDelete", message => {
@@ -946,16 +904,59 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
-  if (interaction.isChatInputCommand() && interaction.commandName === "requirements") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "rq") {
     if (!interaction.guild) {
-      return interaction.reply({ content: "Use /requirements in a server.", ephemeral: true });
+      return interaction.reply({ content: "Use /rq add in a server.", ephemeral: true });
     }
-    const selectedUser = interaction.options.getUser("staff_member") || interaction.user;
-    const member = await interaction.guild.members.fetch(selectedUser.id).catch(() => null);
+    if (interaction.options.getSubcommand() !== "add") return;
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member) {
-      return interaction.reply({ content: "I couldn't find that member in this server.", ephemeral: true });
+      return interaction.reply({ content: "I couldn't find your member record in this server.", ephemeral: true });
     }
-    await interaction.reply({ embeds: [buildWeeklyRequirementsEmbed(member)] });
+    if (!isRequirementsStaff(member)) {
+      return interaction.reply({ content: "⛔ Only staff can add to weekly requirements.", ephemeral: true });
+    }
+    await interaction.reply({
+      content: "Choose what you completed. Each button adds exactly +1 to your own weekly total.",
+      embeds: [buildWeeklyRequirementsEmbed(member)],
+      components: buildRequirementAddComponents(interaction.user.id),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith("rq:add:")) {
+    if (!interaction.guild) {
+      return interaction.reply({ content: "Use weekly requirement buttons in a server.", ephemeral: true });
+    }
+    const [, , ownerId, type] = interaction.customId.split(":");
+    if (ownerId !== interaction.user.id) {
+      return interaction.reply({ content: "Only the staff member who opened this panel can use it.", ephemeral: true });
+    }
+    const labels = { tickets: "Ticket", deployments: "Deployment", vouches: "Vouch" };
+    if (!Object.prototype.hasOwnProperty.call(labels, type)) {
+      return interaction.reply({ content: "That weekly requirement option is invalid.", ephemeral: true });
+    }
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isRequirementsStaff(member)) {
+      return interaction.reply({ content: "⛔ Only staff can add to weekly requirements.", ephemeral: true });
+    }
+    const recorded = requirementsTracker.recordEvent({
+      key: "manual:" + interaction.id,
+      type,
+      guildId: interaction.guild.id,
+      userId: interaction.user.id,
+      sourceId: interaction.channelId,
+      createdAt: Date.now(),
+    });
+    if (!recorded) {
+      return interaction.reply({ content: "I couldn't record that addition. Please try again.", ephemeral: true });
+    }
+    await interaction.update({
+      content: "✅ Added +1 " + labels[type] + ". Click a button again to log another one.",
+      embeds: [buildWeeklyRequirementsEmbed(member)],
+      components: buildRequirementAddComponents(interaction.user.id),
+    });
     return;
   }
 
@@ -1073,13 +1074,16 @@ async function handleCommandMessage(message) {
     switch (cmd) {
 
 
-      case "requirements": {
-        if (targetUser && !targetMember) {
-          return void message.reply("❌ I couldn't find that member in this server.");
+      case "newweek": {
+        const permissions = message.member?.permissions;
+        if (
+          !permissions?.has(PermissionFlagsBits.ManageGuild) &&
+          !permissions?.has(PermissionFlagsBits.Administrator)
+        ) {
+          return void message.reply("⛔ You need Manage Server permission to reset this server's weekly requirements.");
         }
-        const member = targetUser ? targetMember : message.member;
-        if (!member) return void message.reply("❌ I couldn't find your member record in this server.");
-        return void message.reply({ embeds: [buildWeeklyRequirementsEmbed(member)] });
+        const cleared = requirementsTracker.resetGuild(message.guild.id);
+        return void message.reply("✅ Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
       }
 
       case "setrank": {
@@ -2175,6 +2179,7 @@ async function handleCommandMessage(message) {
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
+          "**Weekly Requirements**  `/rq add` (staff adds +1 ticket, deployment, or vouch) `!newweek` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
