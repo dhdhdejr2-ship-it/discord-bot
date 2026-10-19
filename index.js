@@ -3,11 +3,17 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const cors = require("cors");
+const weeklyRequirements = require("./lib/weekly-requirements");
 
 
 // ─── Storage ───────────────────────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const REQUIREMENTS_DATA_DIR = path.resolve(process.env.REQUIREMENTS_DATA_DIR?.trim() || DATA_DIR);
+const requirementsTracker = weeklyRequirements.createRequirementsTracker(REQUIREMENTS_DATA_DIR);
+if (process.env.NODE_ENV === "production" && !process.env.REQUIREMENTS_DATA_DIR?.trim()) {
+  console.warn("[requirements] REQUIREMENTS_DATA_DIR is not set; mount persistent storage and point this variable to it so weekly event history survives redeploys.");
+}
 
 function loadJSON(file, def = []) {
   const p = path.join(DATA_DIR, file);
@@ -298,21 +304,39 @@ function resumeGiveaways(client) {
 
 // ─── Client ────────────────────────────────────────────────────────────────
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Channel],
 });
 
-function buildWeeklyRequirementsEmbed() {
+function buildWeeklyRequirementsEmbed(member) {
+  const counts = requirementsTracker.getCounts(member.guild.id, member.id);
+  const targets = weeklyRequirements.REQUIREMENT_TARGETS;
+  const completed = Object.keys(targets).filter(type => counts[type] >= targets[type]).length;
+  const met = completed === Object.keys(targets).length;
+  const week = weeklyRequirements.getWeekWindow(Date.now());
+  const nextReset = new Intl.DateTimeFormat("en-GB", {
+    timeZone: weeklyRequirements.TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(week.end));
+  const mark = value => value >= targets.tickets ? "✅" : "❌";
   return new EmbedBuilder()
-    .setTitle("📋 Weekly Requirements")
-    .setDescription("PING 4 HELP (youssef)\n\nStatus: ⚠️ Requirements Not Met")
-    .setColor(0x2b2d31)
+    .setTitle("📋 Weekly Requirements — " + member.displayName)
+    .setDescription("Status: " + (met ? "✅ Requirements Met" : "⚠️ Requirements Not Met"))
+    .setColor(met ? 0x57f287 : 0xf0b232)
+    .setThumbnail(member.user.displayAvatarURL())
     .addFields(
-      { name: "🎟️ Tickets", value: "34/10 ✅", inline: false },
-      { name: "🚀 Deployments", value: "0/5 ❌", inline: false },
-      { name: "⭐ Vouchers", value: "15/5 ✅", inline: false },
-      { name: "📊 Progress", value: "2/3 requirements completed", inline: false },
-    );
+      { name: "🎟️ Tickets", value: counts.tickets + "/" + targets.tickets + " " + (counts.tickets >= targets.tickets ? "✅" : "❌"), inline: false },
+      { name: "🚀 Deployments", value: counts.deployments + "/" + targets.deployments + " " + (counts.deployments >= targets.deployments ? "✅" : "❌"), inline: false },
+      { name: "⭐ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "✅" : "❌"), inline: false },
+      { name: "📊 Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
+    )
+    .setFooter({ text: "FTL Staff Tracker • Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
+    .setTimestamp();
 }
 async function registerSetRankSlashCommand(application) {
   const commandData = {
@@ -351,7 +375,13 @@ async function registerWeeklyRequirementsSlashCommand(application) {
   const commandData = {
     type: ApplicationCommandType.ChatInput,
     name: "requirements",
-    description: "Show weekly requirements.",
+    description: "Show weekly requirements for you or a staff member.",
+    options: [{
+      type: ApplicationCommandOptionType.User,
+      name: "staff_member",
+      description: "Staff member to view; defaults to yourself.",
+      required: false,
+    }],
   };
   const commands = await application.commands.fetch();
   const existingCommand = commands.find(command =>
@@ -756,6 +786,92 @@ client.on("guildMemberRemove", async member => {
   } catch(e) { console.error("Leave error:", e); }
 });
 
+// ─── Weekly requirements activity tracking ──────────────────────────────────
+function isRequirementsStaff(member) {
+  if (!member || member.user?.bot) return false;
+  const configuredRoleIds = (process.env.STAFF_ROLE_IDS || process.env.MOD_ROLE_ID || "")
+    .split(/[ ,]+/)
+    .map(id => id.trim())
+    .filter(Boolean);
+  if (configuredRoleIds.some(id => member.roles.cache.has(id))) return true;
+  const staffPermissions = [
+    PermissionFlagsBits.Administrator,
+    PermissionFlagsBits.ManageGuild,
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.ModerateMembers,
+  ];
+  if (staffPermissions.some(permission => member.permissions.has(permission))) return true;
+  const staffRoleWords = new Set(["staff", "mod", "moderator", "admin", "administrator", "helper", "support", "hrs", "management"]);
+  return member.roles.cache.some(role =>
+    normalizeSetRankRoleChoice(role.name).split(/\s+/).some(word => staffRoleWords.has(word))
+  );
+}
+
+async function fetchRequirementsMember(guild, userId) {
+  return guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+}
+
+async function trackRequirementsMessage(message) {
+  if (!message.guild || message.author.bot || message.author.id === client.user?.id || message.webhookId) return;
+  const content = String(message.content || "").trim();
+  if (content.startsWith(PREFIX)) return;
+  if (!content && !message.attachments?.size && !message.embeds?.length) return;
+
+  const channel = message.channel;
+  const member = message.member || await fetchRequirementsMember(message.guild, message.author.id);
+  if (
+    member && isRequirementsStaff(member) &&
+    weeklyRequirements.channelMatchesActivity(channel, "ticket")
+  ) {
+    requirementsTracker.recordEvent({
+      key: "ticket:" + message.guild.id + ":" + channel.id + ":" + member.id,
+      type: "tickets",
+      guildId: message.guild.id,
+      userId: member.id,
+      sourceId: channel.id,
+      createdAt: message.createdTimestamp,
+    });
+  }
+
+  if (!weeklyRequirements.channelMatchesActivity(channel, "vouch")) return;
+  for (const userId of message.mentions.users.keys()) {
+    if (userId === message.author.id) continue;
+    const targetMember = message.mentions.members?.get(userId) || await fetchRequirementsMember(message.guild, userId);
+    if (!isRequirementsStaff(targetMember)) continue;
+    requirementsTracker.recordEvent({
+      key: "vouch:" + message.guild.id + ":" + message.id + ":" + userId,
+      type: "vouches",
+      guildId: message.guild.id,
+      userId,
+      sourceId: channel.id,
+      createdAt: message.createdTimestamp,
+    });
+  }
+}
+
+client.on("messageCreate", message => {
+  void trackRequirementsMessage(message).catch(error => {
+    console.error("[requirements] Could not record message activity:", error);
+  });
+});
+
+client.on("voiceStateUpdate", (oldState, newState) => {
+  const member = newState.member || oldState.member;
+  if (!member || !newState.channel || newState.channelId === oldState.channelId) return;
+  if (!weeklyRequirements.channelMatchesActivity(newState.channel, "deployment")) return;
+  if (weeklyRequirements.channelMatchesActivity(oldState.channel, "deployment")) return;
+  if (!isRequirementsStaff(member)) return;
+  requirementsTracker.recordEvent({
+    key: "deployment:" + member.guild.id + ":" + member.id + ":" + newState.channelId + ":" + (newState.sessionId || Date.now()),
+    type: "deployments",
+    guildId: member.guild.id,
+    userId: member.id,
+    sourceId: newState.channelId,
+    createdAt: Date.now(),
+  });
+});
+
 // ─── Snipe: track deleted messages ─────────────────────────────────────────
 client.on("messageDelete", message => {
   if (message.author?.bot) return;
@@ -831,7 +947,15 @@ client.on("interactionCreate", async interaction => {
   }
 
   if (interaction.isChatInputCommand() && interaction.commandName === "requirements") {
-    await interaction.reply({ embeds: [buildWeeklyRequirementsEmbed()] });
+    if (!interaction.guild) {
+      return interaction.reply({ content: "Use /requirements in a server.", ephemeral: true });
+    }
+    const selectedUser = interaction.options.getUser("staff_member") || interaction.user;
+    const member = await interaction.guild.members.fetch(selectedUser.id).catch(() => null);
+    if (!member) {
+      return interaction.reply({ content: "I couldn't find that member in this server.", ephemeral: true });
+    }
+    await interaction.reply({ embeds: [buildWeeklyRequirementsEmbed(member)] });
     return;
   }
 
@@ -950,7 +1074,12 @@ async function handleCommandMessage(message) {
 
 
       case "requirements": {
-        return void message.reply({ embeds: [buildWeeklyRequirementsEmbed()] });
+        if (targetUser && !targetMember) {
+          return void message.reply("❌ I couldn't find that member in this server.");
+        }
+        const member = targetUser ? targetMember : message.member;
+        if (!member) return void message.reply("❌ I couldn't find your member record in this server.");
+        return void message.reply({ embeds: [buildWeeklyRequirementsEmbed(member)] });
       }
 
       case "setrank": {
