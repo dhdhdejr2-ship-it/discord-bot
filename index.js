@@ -1063,6 +1063,26 @@ async function handleCommandMessage(message) {
     switch (cmd) {
 
 
+      case "rq": {
+        const subcommand = args[0]?.toLowerCase();
+        if (subcommand !== "add") {
+          return void message.reply("Usage: !rq add");
+        }
+        const member = message.member;
+        if (!member) {
+          return void message.reply("I couldn't find your member record in this server.");
+        }
+        if (!isRequirementsStaff(member)) {
+          return void message.reply("⛔ Only staff can add to weekly requirements.");
+        }
+        return void message.reply({
+          content: "Choose what you completed. Each button adds exactly +1 to your own weekly total.",
+          embeds: [buildWeeklyRequirementsEmbed(member)],
+          components: buildRequirementAddComponents(message.author.id),
+          allowedMentions: { parse: [] },
+        });
+      }
+
       case "requirements": {
         const subcommand = args[0]?.toLowerCase();
         if (subcommand === "check") {
@@ -2193,7 +2213,7 @@ async function handleCommandMessage(message) {
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
-          "**Weekly Requirements**  `/rq add` (staff adds +1 ticket, deployment, or vouch) `!requirements check` (staff) `!requirements reset` (Manage Server)",
+          "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
