@@ -317,7 +317,7 @@ function buildWeeklyRequirementsEmbed(member) {
   return new EmbedBuilder()
     .setTitle("📋 Weekly Requirements — " + member.displayName)
     .setDescription("Status: " + (met ? "✅ Requirements Met" : "⚠️ Requirements Not Met"))
-    .setColor(met ? 0x57f287 : 0xf0b232)
+    .setColor(met ? 0x57f287 : 0x3498db)
     .setThumbnail(member.user.displayAvatarURL())
     .addFields(
       { name: "🎟️ Tickets", value: counts.tickets + "/" + targets.tickets + " " + (counts.tickets >= targets.tickets ? "✅" : "❌"), inline: false },
