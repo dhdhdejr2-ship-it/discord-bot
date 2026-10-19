@@ -335,15 +335,15 @@ function buildWeeklyRequirementsEmbed(member) {
       { name: "⭐ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "✅" : "❌"), inline: false },
       { name: "📊 Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
     )
-    .setFooter({ text: KOC_BRAND + " • Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
+    .setFooter({ text: "Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
     .setTimestamp();
 }
 
 function buildRequirementAddComponents(userId) {
   const choices = [
-    { type: "tickets", label: "1. Ticket +1" },
-    { type: "deployments", label: "2. Deployment +1" },
-    { type: "vouches", label: "3. Vouch +1" },
+    { type: "tickets", label: "1. Ticket +1 • " + KOC_BRAND },
+    { type: "deployments", label: "2. Deployment +1 • " + KOC_BRAND },
+    { type: "vouches", label: "3. Vouch +1 • " + KOC_BRAND },
   ];
   const row = new ActionRowBuilder().addComponents(
     choices.map(choice =>
