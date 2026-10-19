@@ -104,6 +104,7 @@ const economy = {
 function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
+const RANKERS_ROLE_ID = "1557558508428337185";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const KOC_BRAND = "KOC Kill Ops City";
 const PROTECTED_GUILD_ID = "1448233642999545920"; // This server is never left by owner leave commands
@@ -962,6 +963,7 @@ client.on("interactionCreate", async interaction => {
       author: interaction.user,
       guild: interaction.guild,
       member,
+      isSlashCommand: true,
       content: "!setrank " + interaction.options.getString("roblox_username", true) + " " + interaction.options.getString("role_name", true),
       attachments: { size: 0 },
       embeds: [],
@@ -1121,17 +1123,23 @@ async function handleCommandMessage(message) {
       }
 
       case "setrank": {
-        const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
-        if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
-          return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
+        const isRankersPrefixCommand =
+          message.isSlashCommand !== true && message.member?.roles.cache.has(RANKERS_ROLE_ID);
+        if (!isRankersPrefixCommand) {
+          const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
+          if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
+            return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
+          }
+          if (!message.guild.roles.cache.has(moderatorRoleId)) {
+            return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
+          }
+          if (!message.member?.roles.cache.has(moderatorRoleId)) {
+            const denial = message.isSlashCommand
+              ? "⛔ You need the configured moderator role to use /setrank."
+              : "⛔ You need the Rankers role or configured moderator role to use !setrank.";
+            return void message.reply(denial);
+          }
         }
-        if (!message.guild.roles.cache.has(moderatorRoleId)) {
-          return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
-        }
-        if (!message.member?.roles.cache.has(moderatorRoleId)) {
-          return void message.reply("⛔ You need the configured moderator role to use !setrank or /setrank.");
-        }
-
         const robloxUsername = args[0];
         const requestedRoleName = args.slice(1).join(" ").trim();
         if (!robloxUsername || !requestedRoleName) {
