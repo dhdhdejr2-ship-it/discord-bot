@@ -335,15 +335,15 @@ function buildWeeklyRequirementsEmbed(member) {
       { name: "⭐ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "✅" : "❌"), inline: false },
       { name: "📊 Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
     )
-    .setFooter({ text: "FTL Staff Tracker • Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
+    .setFooter({ text: "Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
     .setTimestamp();
 }
 
 function buildRequirementAddComponents(userId) {
   const choices = [
-    { type: "tickets", label: "1. Ticket +1" },
-    { type: "deployments", label: "2. Deployment +1" },
-    { type: "vouches", label: "3. Vouch +1" },
+    { type: "tickets", label: "1. Ticket +1 • " + KOC_BRAND },
+    { type: "deployments", label: "2. Deployment +1 • " + KOC_BRAND },
+    { type: "vouches", label: "3. Vouch +1 • " + KOC_BRAND },
   ];
   const row = new ActionRowBuilder().addComponents(
     choices.map(choice =>
@@ -1074,6 +1074,31 @@ async function handleCommandMessage(message) {
     switch (cmd) {
 
 
+      case "requirements": {
+        const subcommand = args[0]?.toLowerCase();
+        if (subcommand === "check") {
+          const member = message.member;
+          if (!isRequirementsStaff(member)) {
+            return void message.reply("⛔ Only staff can check weekly requirements.");
+          }
+          return void message.reply({
+            embeds: [buildWeeklyRequirementsEmbed(member)],
+            allowedMentions: { parse: [] },
+          });
+        }
+        if (subcommand === "reset") {
+          const permissions = message.member?.permissions;
+          if (
+            !permissions?.has(PermissionFlagsBits.ManageGuild) &&
+            !permissions?.has(PermissionFlagsBits.Administrator)
+          ) {
+            return void message.reply("⛔ You need Manage Server permission to reset this server's weekly requirements.");
+          }
+          const cleared = requirementsTracker.resetGuild(message.guild.id);
+          return void message.reply("✅ Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
+        }
+        return void message.reply("Usage: !requirements check or !requirements reset (Manage Server)");
+      }
       case "newweek": {
         const permissions = message.member?.permissions;
         if (
@@ -2179,7 +2204,7 @@ async function handleCommandMessage(message) {
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
-          "**Weekly Requirements**  `/rq add` (staff adds +1 ticket, deployment, or vouch) `!newweek` (Manage Server)",
+          "**Weekly Requirements**  `/rq add` (staff adds +1 ticket, deployment, or vouch) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
