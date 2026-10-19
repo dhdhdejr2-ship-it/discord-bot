@@ -313,16 +313,6 @@ function buildWeeklyRequirementsEmbed(member) {
   const targets = weeklyRequirements.REQUIREMENT_TARGETS;
   const completed = Object.keys(targets).filter(type => counts[type] >= targets[type]).length;
   const met = completed === Object.keys(targets).length;
-  const week = weeklyRequirements.getWeekWindow(Date.now());
-  const nextReset = new Intl.DateTimeFormat("en-GB", {
-    timeZone: weeklyRequirements.TIME_ZONE,
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(week.end));
   const mark = value => value >= targets.tickets ? "✅" : "❌";
   return new EmbedBuilder()
     .setTitle("📋 Weekly Requirements — " + member.displayName)
@@ -335,8 +325,7 @@ function buildWeeklyRequirementsEmbed(member) {
       { name: "⭐ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "✅" : "❌"), inline: false },
       { name: "📊 Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
     )
-    .setFooter({ text: "Resets every Monday (Europe/Amsterdam) • Next: " + nextReset })
-    .setTimestamp();
+
 }
 
 function buildRequirementAddComponents(userId) {
