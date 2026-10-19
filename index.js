@@ -875,10 +875,14 @@ client.on("interactionCreate", async interaction => {
     if (!interaction.guild) return interaction.respond([]);
     const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
     const memberRoles = interaction.member?.roles;
-    const hasModeratorRole = Array.isArray(memberRoles)
+    const hasRankersRole = Array.isArray(memberRoles)
+      ? memberRoles.includes(RANKERS_ROLE_ID)
+      : Boolean(memberRoles?.cache?.has(RANKERS_ROLE_ID));
+    const validModeratorRoleId = Boolean(moderatorRoleId && /^[0-9]+$/.test(moderatorRoleId));
+    const hasModeratorRole = Boolean(validModeratorRoleId && (Array.isArray(memberRoles)
       ? memberRoles.includes(moderatorRoleId)
-      : Boolean(memberRoles?.cache?.has(moderatorRoleId));
-    if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId) || !hasModeratorRole) {
+      : memberRoles?.cache?.has(moderatorRoleId)));
+    if (!hasRankersRole && !hasModeratorRole) {
       return interaction.respond([]);
     }
     const focusedOption = interaction.options.getFocused(true);
@@ -1123,9 +1127,8 @@ async function handleCommandMessage(message) {
       }
 
       case "setrank": {
-        const isRankersPrefixCommand =
-          message.isSlashCommand !== true && message.member?.roles.cache.has(RANKERS_ROLE_ID);
-        if (!isRankersPrefixCommand) {
+        const hasRankersRole = message.member?.roles.cache.has(RANKERS_ROLE_ID);
+        if (!hasRankersRole) {
           const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
           if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
             return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
@@ -1135,7 +1138,7 @@ async function handleCommandMessage(message) {
           }
           if (!message.member?.roles.cache.has(moderatorRoleId)) {
             const denial = message.isSlashCommand
-              ? "⛔ You need the configured moderator role to use /setrank."
+              ? "⛔ You need the Rankers role or configured moderator role to use /setrank."
               : "⛔ You need the Rankers role or configured moderator role to use !setrank.";
             return void message.reply(denial);
           }
