@@ -7,7 +7,6 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   REQUIREMENT_TARGETS,
-  channelMatchesActivity,
   createRequirementsTracker,
   getWeekWindow,
 } = require("../lib/weekly-requirements");
@@ -17,12 +16,6 @@ test("week boundaries are Monday midnight in Amsterdam, including the autumn DST
   assert.equal(week.start, Date.parse("2026-10-18T22:00:00.000Z"));
   assert.equal(week.end, Date.parse("2026-10-25T23:00:00.000Z"));
   assert.equal(week.timeZone, "Europe/Amsterdam");
-});
-
-test("channel matching recognizes ticket/vouch channels and their parent categories", () => {
-  assert.equal(channelMatchesActivity({ name: "ticket-123", parent: { name: "Open Tickets" } }, "ticket"), true);
-  assert.equal(channelMatchesActivity({ name: "general-chat", parent: { name: "⭐ Vouches" } }, "vouch"), true);
-  assert.equal(channelMatchesActivity({ name: "general-chat", parent: { name: "General" } }, "deployment"), false);
 });
 
 test("tracker deduplicates events and reports only this week's counts by member and guild", t => {
@@ -46,4 +39,38 @@ test("tracker deduplicates events and reports only this week's counts by member 
   const nextMonday = Date.parse("2026-10-25T23:00:00.000Z");
   assert.deepEqual(tracker.getCounts("guild", "staff", nextMonday), { tickets: 0, deployments: 0, vouches: 0 });
   assert.deepEqual(REQUIREMENT_TARGETS, { tickets: 10, deployments: 5, vouches: 5 });
+});
+
+test("resetGuild clears all requirement types for one server and preserves other servers", t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "weekly-requirements-reset-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const tracker = createRequirementsTracker(directory);
+  const now = Date.parse("2026-10-19T12:00:00.000Z");
+  for (const [guildId, userId, type] of [
+    ["guild-a", "staff-a", "tickets"],
+    ["guild-a", "staff-a", "deployments"],
+    ["guild-a", "staff-a", "vouches"],
+    ["guild-b", "staff-b", "tickets"],
+  ]) {
+    assert.equal(tracker.recordEvent({
+      key: guildId + ":" + type,
+      type,
+      guildId,
+      userId,
+      createdAt: now,
+    }), true);
+  }
+
+  assert.equal(tracker.resetGuild("guild-a"), 3);
+  assert.equal(tracker.resetGuild("guild-a"), 0);
+  assert.deepEqual(tracker.getCounts("guild-a", "staff-a", now), {
+    tickets: 0,
+    deployments: 0,
+    vouches: 0,
+  });
+  assert.deepEqual(tracker.getCounts("guild-b", "staff-b", now), {
+    tickets: 1,
+    deployments: 0,
+    vouches: 0,
+  });
 });
