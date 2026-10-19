@@ -4,6 +4,7 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const weeklyRequirements = require("./lib/weekly-requirements");
+const { getSetRankRoleIds, memberHasAnyRole } = require("./lib/setrank-access");
 
 
 // ─── Storage ───────────────────────────────────────────────────────────────
@@ -883,12 +884,8 @@ client.on("messageCreate", async message => {
 client.on("interactionCreate", async interaction => {
   if (interaction.isAutocomplete() && interaction.commandName === "setrank") {
     if (!interaction.guild) return interaction.respond([]);
-    const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
-    const memberRoles = interaction.member?.roles;
-    const hasModeratorRole = Array.isArray(memberRoles)
-      ? memberRoles.includes(moderatorRoleId)
-      : Boolean(memberRoles?.cache?.has(moderatorRoleId));
-    if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId) || !hasModeratorRole) {
+    const authorizedRoleIds = getSetRankRoleIds();
+    if (!memberHasAnyRole(interaction.member, authorizedRoleIds)) {
       return interaction.respond([]);
     }
     const focusedOption = interaction.options.getFocused(true);
@@ -1087,15 +1084,16 @@ async function handleCommandMessage(message) {
       }
 
       case "setrank": {
-        const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
-        if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
-          return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
+        const configuredRoleIds = getSetRankRoleIds();
+        if (configuredRoleIds.length === 0) {
+          return void message.reply("❌ No valid ranker or moderator role is configured. Set MOD_ROLE_ID or SETRANK_ROLE_IDS in Railway.");
         }
-        if (!message.guild.roles.cache.has(moderatorRoleId)) {
-          return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
+        const serverRoleIds = configuredRoleIds.filter(roleId => message.guild.roles.cache.has(roleId));
+        if (serverRoleIds.length === 0) {
+          return void message.reply("❌ None of the configured ranker or moderator roles were found in this server. Check MOD_ROLE_ID or SETRANK_ROLE_IDS in Railway.");
         }
-        if (!message.member?.roles.cache.has(moderatorRoleId)) {
-          return void message.reply("⛔ You need the configured moderator role to use !setrank or /setrank.");
+        if (!memberHasAnyRole(message.member, serverRoleIds)) {
+          return void message.reply("⛔ You need a configured moderator or ranker role to use !setrank or /setrank.");
         }
 
         const robloxUsername = args[0];
