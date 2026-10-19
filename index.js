@@ -330,9 +330,9 @@ function buildWeeklyRequirementsEmbed(member) {
 
 function buildRequirementAddComponents(userId) {
   const choices = [
-    { type: "tickets", label: "1. Ticket +1 • " + KOC_BRAND },
-    { type: "deployments", label: "2. Deployment +1 • " + KOC_BRAND },
-    { type: "vouches", label: "3. Vouch +1 • " + KOC_BRAND },
+    { type: "tickets", label: "1. Ticket +1" },
+    { type: "deployments", label: "2. Deployment +1" },
+    { type: "vouches", label: "3. Vouch +1" },
   ];
   const row = new ActionRowBuilder().addComponents(
     choices.map(choice =>
