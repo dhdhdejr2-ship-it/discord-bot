@@ -419,6 +419,53 @@ function normalizeSetRankRoleChoice(value) {
     .trim();
 }
 
+const RANKER_ROLE_LIMIT_CACHE_TTL_MS = 60 * 1000;
+let rankerRoleLimitCache = { groupId: null, expiresAt: 0, value: null };
+let rankerRoleLimitRequest = null;
+
+async function getRankerRoleLimit(groupId) {
+  if (!groupId || !/^[0-9]+$/.test(groupId)) throw new Error("Invalid Roblox group ID for rank limit lookup");
+  if (rankerRoleLimitCache.groupId === groupId && Date.now() < rankerRoleLimitCache.expiresAt) {
+    return rankerRoleLimitCache.value;
+  }
+  if (rankerRoleLimitRequest?.groupId === groupId) return rankerRoleLimitRequest.promise;
+
+  const promise = (async () => {
+    const response = await fetch("https://groups.roblox.com/v1/groups/" + encodeURIComponent(groupId) + "/roles");
+    let payload = {};
+    try { payload = await response.json(); } catch {}
+    if (!response.ok || !Array.isArray(payload.roles)) {
+      const error = new Error("Roblox role rank lookup failed");
+      error.status = response.status;
+      throw error;
+    }
+    const roles = payload.roles.filter(role =>
+      role && role.id != null && role.rank != null && Number.isInteger(Number(role.rank)) &&
+      typeof role.name === "string" && role.name.trim()
+    );
+    const contentCreatorRoles = roles.filter(role => normalizeSetRankRoleChoice(role.name) === "content creator");
+    if (contentCreatorRoles.length !== 1) throw new Error("Could not uniquely identify the Content Creator role");
+    const contentCreatorRank = Number(contentCreatorRoles[0].rank);
+    const ranksByRoleId = Object.create(null);
+    for (const role of roles) ranksByRoleId[String(role.id)] = Number(role.rank);
+    return {
+      contentCreatorRank,
+      ranksByRoleId,
+      allowedRoleNames: roles.filter(role => Number(role.rank) <= contentCreatorRank).map(role => role.name.trim()),
+    };
+  })();
+  rankerRoleLimitRequest = { groupId, promise };
+  try {
+    const value = await promise;
+    if (rankerRoleLimitRequest?.promise === promise) {
+      rankerRoleLimitCache = { groupId, expiresAt: Date.now() + RANKER_ROLE_LIMIT_CACHE_TTL_MS, value };
+    }
+    return value;
+  } finally {
+    if (rankerRoleLimitRequest?.promise === promise) rankerRoleLimitRequest = null;
+  }
+}
+
 async function getSetRankRoleNames() {
   const apiKey = process.env.ROBLOX_API_KEY?.trim();
   const groupId = process.env.ROBLOX_GROUP_ID?.trim();
@@ -888,7 +935,13 @@ client.on("interactionCreate", async interaction => {
     const focusedOption = interaction.options.getFocused(true);
     if (focusedOption.name !== "role_name") return interaction.respond([]);
     try {
-      const roleNames = await getSetRankRoleNames();
+      let roleNames = await getSetRankRoleNames();
+      if (hasRankersRole && !hasModeratorRole) {
+        const groupId = process.env.ROBLOX_GROUP_ID?.trim();
+        const rankLimit = await getRankerRoleLimit(groupId);
+        const allowedNames = new Set(rankLimit.allowedRoleNames.map(normalizeSetRankRoleChoice));
+        roleNames = roleNames.filter(name => allowedNames.has(normalizeSetRankRoleChoice(name)));
+      }
       await interaction.respond(buildSetRankRoleChoices(roleNames, focusedOption.value));
     } catch (error) {
       const status = Number(error?.status || 0);
@@ -1133,22 +1186,23 @@ async function handleCommandMessage(message) {
       }
 
       case "setrank": {
-        const hasRankersRole = message.member?.roles.cache.has(RANKERS_ROLE_ID);
-        if (!hasRankersRole) {
-          const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
-          if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
-            return void message.reply("â The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
-          }
-          if (!message.guild.roles.cache.has(moderatorRoleId)) {
-            return void message.reply("â The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
-          }
-          if (!message.member?.roles.cache.has(moderatorRoleId)) {
-            const denial = message.isSlashCommand
-              ? "â You need the Rankers role or configured moderator role to use /setrank."
-              : "â You need the Rankers role or configured moderator role to use !setrank.";
-            return void message.reply(denial);
-          }
+        const hasRankersRole = Boolean(message.member?.roles.cache.has(RANKERS_ROLE_ID));
+        const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
+        const validModeratorRoleId = Boolean(moderatorRoleId && /^[0-9]+$/.test(moderatorRoleId));
+        if (!hasRankersRole && !validModeratorRoleId) {
+          return void message.reply("â The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
         }
+        if (!hasRankersRole && !message.guild.roles.cache.has(moderatorRoleId)) {
+          return void message.reply("â The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
+        }
+        const hasModeratorRole = Boolean(validModeratorRoleId && message.guild.roles.cache.has(moderatorRoleId) && message.member?.roles.cache.has(moderatorRoleId));
+        if (!hasRankersRole && !hasModeratorRole) {
+          const denial = message.isSlashCommand
+            ? "â You need the Rankers role or configured moderator role to use /setrank."
+            : "â You need the Rankers role or configured moderator role to use !setrank.";
+          return void message.reply(denial);
+        }
+        const rankerLimitApplies = hasRankersRole && !hasModeratorRole;
         const robloxUsername = args[0];
         const requestedRoleName = args.slice(1).join(" ").trim();
         if (!robloxUsername || !requestedRoleName) {
@@ -1264,6 +1318,25 @@ async function handleCommandMessage(message) {
             });
           }
           const targetRole = roleMatches[0];
+          if (rankerLimitApplies) {
+            operation = "Content Creator rank limit verification";
+            let rankLimit;
+            try {
+              rankLimit = await getRankerRoleLimit(groupId);
+            } catch (error) {
+              const status = Number(error?.status || 0);
+              console.error("[setrank] Ranker role-limit verification failed" + (status ? " (HTTP " + status + ")" : ""));
+              return void message.reply("â I couldn't verify Content Creator's rank, so Rankers can't assign a rank right now. Try again later or ask a moderator.");
+            }
+            const targetRoleId = typeof targetRole.path === "string" ? targetRole.path.split("/").pop() : "";
+            const targetRank = rankLimit.ranksByRoleId[targetRoleId];
+            if (!Number.isInteger(targetRank)) {
+              return void message.reply("â I couldn't verify that Roblox role's rank. Rankers can assign Content Creator or lower only.");
+            }
+            if (targetRank > rankLimit.contentCreatorRank) {
+              return void message.reply("â Rankers can assign Content Creator or lower only.");
+            }
+          }
           let membership = memberships.find(entry => entry && entry.user === "users/" + robloxUser.id);
           if (!membership) {
             operation = "pending join request lookup";
