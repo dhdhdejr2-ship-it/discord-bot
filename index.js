@@ -6,7 +6,7 @@ const cors = require("cors");
 const weeklyRequirements = require("./lib/weekly-requirements");
 
 
-// ─── Storage ───────────────────────────────────────────────────────────────
+// âââ Storage âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const DATA_DIR = path.join(__dirname, "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const REQUIREMENTS_DATA_DIR = path.resolve(process.env.REQUIREMENTS_DATA_DIR?.trim() || DATA_DIR);
@@ -58,7 +58,7 @@ const giveaways = {
   all() { return loadJSON("giveaways.json"); },
 };
 
-// Reminders are persisted (like giveaways) so they survive a bot restart —
+// Reminders are persisted (like giveaways) so they survive a bot restart â
 // previously they only lived in an in-memory setTimeout and were silently
 // lost whenever the process restarted (e.g. on every redeploy).
 const reminders = {
@@ -67,9 +67,9 @@ const reminders = {
   all() { return loadJSON("reminders.json"); },
 };
 
-// ─── Casino economy ─────────────────────────────────────────────────────────
+// âââ Casino economy âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Per-guild, per-user wallets: { "guildId:userId": { balance, bank, lastDaily, lastWork, lastSteal, lastGrab } }
-// `balance` is your wallet (cash on hand) — it's what !steal can take.
+// `balance` is your wallet (cash on hand) â it's what !steal can take.
 // `bank` is safe from !steal; move money there with !deposit.
 const STARTING_BALANCE = 500;
 const DEFAULT_ACCOUNT = { balance: STARTING_BALANCE, bank: 0, lastDaily: 0, lastWork: 0, lastSteal: 0, lastGrab: 0 };
@@ -101,7 +101,7 @@ const economy = {
       .slice(0, limit);
   },
 };
-function fmtMoney(n) { return `💰 ${n.toLocaleString()} chips`; }
+function fmtMoney(n) { return `ð° ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const RANKERS_ROLE_ID = "1557558508428337185";
@@ -112,15 +112,15 @@ const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
 
-const NUMBER_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"];
+const NUMBER_EMOJI = ["1ï¸â£","2ï¸â£","3ï¸â£","4ï¸â£","5ï¸â£"];
 
 const startTime = Date.now();
 const AUTOMOD_RULE_PREFIX = "Bot AutoMod: ";
 
 
-// ─── In-memory state ───────────────────────────────────────────────────────
-const sniped     = new Map(); // channelId → { author, content, timestamp }
-const afkUsers   = new Map(); // userId    → { reason, since }
+// âââ In-memory state âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+const sniped     = new Map(); // channelId â { author, content, timestamp }
+const afkUsers   = new Map(); // userId    â { reason, since }
 
 function parseDuration(s) {
   const m = s.trim().match(/^(\d+)\s*(s|m|h|d)/i);
@@ -129,7 +129,7 @@ function parseDuration(s) {
   return u === "s" ? n*1000 : u === "m" ? n*60000 : u === "h" ? n*3600000 : n*86400000;
 }
 
-// Like parseDuration, but also accepts a bare number (treated as minutes) —
+// Like parseDuration, but also accepts a bare number (treated as minutes) â
 // used by !to/!timeout so "10", "10m", "10min", and "10minutes" all work.
 function parseTimeoutDuration(s) {
   if (!s) return null;
@@ -161,7 +161,7 @@ function requirePerm(msg, perm) {
   return true;
 }
 
-// Resolve a guild member from a mention, raw ID, or username/nickname search —
+// Resolve a guild member from a mention, raw ID, or username/nickname search â
 // lets staff target someone by name so the command doesn't ping them.
 async function resolveMember(guild, query) {
   if (!query) return null;
@@ -221,7 +221,7 @@ function safeMath(expr) {
   } catch { return null; }
 }
 
-// ─── Giveaways ─────────────────────────────────────────────────────────────
+// âââ Giveaways âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 async function endGiveaway(client, messageId) {
   const g = giveaways.get(messageId);
   if (!g || g.ended || g.ending) return;
@@ -233,7 +233,7 @@ async function endGiveaway(client, messageId) {
     if (!g.participants.length) {
       giveaways.update(messageId, { ended: true, ending: false, winners: [] });
       const embed = EmbedBuilder.from(message.embeds[0])
-        .setTitle("🎉 Giveaway Ended!")
+        .setTitle("ð Giveaway Ended!")
         .setDescription(`**Prize:** ${prize}\n**Winner(s):** No participants!`)
         .setColor(0xed4245);
       return await message.edit({ embeds: [embed], components: [] });
@@ -245,11 +245,11 @@ async function endGiveaway(client, messageId) {
     // can never announce different results twice.
     giveaways.update(messageId, { ended: true, ending: false, winners });
     const embed = EmbedBuilder.from(message.embeds[0])
-      .setTitle("🎉 Giveaway Ended!")
+      .setTitle("ð Giveaway Ended!")
       .setDescription(`**Prize:** ${prize}\n**Winner(s):** ${mentions}`)
       .setColor(0xffd700);
     await message.edit({ embeds: [embed], components: [] });
-    await channel.send(`🎉 Congratulations ${mentions}! You won **${prize}**!`);
+    await channel.send(`ð Congratulations ${mentions}! You won **${prize}**!`);
   } catch (e) {
     giveaways.update(messageId, { ending: false });
     console.error("Giveaway end error:", e);
@@ -257,16 +257,16 @@ async function endGiveaway(client, messageId) {
 }
 function scheduleGiveaway(client, messageId, ms) { setTimeout(() => endGiveaway(client, messageId), ms); }
 
-// ─── Reminders ─────────────────────────────────────────────────────────────
+// âââ Reminders âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 async function fireReminder(client, r) {
   reminders.remove(r.id);
   try {
     const user = await client.users.fetch(r.userId);
-    await user.send({ embeds: [new EmbedBuilder().setTitle("⏰ Reminder!").setDescription(r.reminder).setColor(0xffd700).setFooter({ text: `Set in ${r.guildName}` }).setTimestamp()] });
+    await user.send({ embeds: [new EmbedBuilder().setTitle("â° Reminder!").setDescription(r.reminder).setColor(0xffd700).setFooter({ text: `Set in ${r.guildName}` }).setTimestamp()] });
   } catch {
     try {
       const ch = await client.channels.fetch(r.channelId);
-      await ch.send(`⏰ <@${r.userId}>, reminder: **${r.reminder}**`);
+      await ch.send(`â° <@${r.userId}>, reminder: **${r.reminder}**`);
     } catch {}
   }
 }
@@ -282,7 +282,7 @@ function resumeReminders(client) {
   }
 }
 
-// ─── Static bot images ──────────────────────────────────────────────────────
+// âââ Static bot images ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function imageAttachment(filename) {
   const imagePath = path.join(__dirname, "assets", filename);
   if (!fs.existsSync(imagePath)) return null;
@@ -303,7 +303,7 @@ function resumeGiveaways(client) {
   }
 }
 
-// ─── Client ────────────────────────────────────────────────────────────────
+// âââ Client ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Channel],
@@ -314,17 +314,17 @@ function buildWeeklyRequirementsEmbed(member) {
   const targets = weeklyRequirements.REQUIREMENT_TARGETS;
   const completed = Object.keys(targets).filter(type => counts[type] >= targets[type]).length;
   const met = completed === Object.keys(targets).length;
-  const mark = value => value >= targets.tickets ? "✅" : "❌";
+  const mark = value => value >= targets.tickets ? "â" : "â";
   return new EmbedBuilder()
-    .setTitle("📋 Weekly Requirements — " + member.displayName)
-    .setDescription("Status: " + (met ? "✅ Requirements Met" : "⚠️ Requirements Not Met"))
+    .setTitle("ð Weekly Requirements â " + member.displayName)
+    .setDescription("Status: " + (met ? "â Requirements Met" : "â ï¸ Requirements Not Met"))
     .setColor(met ? 0x57f287 : 0x3498db)
     .setThumbnail(member.user.displayAvatarURL())
     .addFields(
-      { name: "🎟️ Tickets", value: counts.tickets + "/" + targets.tickets + " " + (counts.tickets >= targets.tickets ? "✅" : "❌"), inline: false },
-      { name: "🚀 Deployments", value: counts.deployments + "/" + targets.deployments + " " + (counts.deployments >= targets.deployments ? "✅" : "❌"), inline: false },
-      { name: "⭐ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "✅" : "❌"), inline: false },
-      { name: "📊 Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
+      { name: "ðï¸ Tickets", value: counts.tickets + "/" + targets.tickets + " " + (counts.tickets >= targets.tickets ? "â" : "â"), inline: false },
+      { name: "ð Deployments", value: counts.deployments + "/" + targets.deployments + " " + (counts.deployments >= targets.deployments ? "â" : "â"), inline: false },
+      { name: "â­ Vouches", value: counts.vouches + "/" + targets.vouches + " " + (counts.vouches >= targets.vouches ? "â" : "â"), inline: false },
+      { name: "ð Progress", value: completed + "/" + Object.keys(targets).length + " requirements completed", inline: false },
     )
 
 }
@@ -376,7 +376,7 @@ async function registerSetRankSlashCommand(application) {
   } else {
     await application.commands.create(commandData);
   }
-  console.log("✅ Registered /setrank slash command.");
+  console.log("â Registered /setrank slash command.");
 }
 
 async function registerRequirementsSlashCommand(application) {
@@ -404,7 +404,7 @@ async function registerRequirementsSlashCommand(application) {
   } else {
     await application.commands.create(commandData);
   }
-  console.log("✅ Registered /rq add and removed the old /requirements slash command.");
+  console.log("â Registered /rq add and removed the old /requirements slash command.");
 }
 const SETRANK_ROLE_CACHE_TTL_MS = 60 * 1000;
 let setRankRoleNamesCache = { groupId: null, expiresAt: 0, roles: [] };
@@ -495,10 +495,10 @@ function buildSetRankRoleChoices(roleNames, focusedValue) {
 function markBotActive() {
   if (!client.user) return;
   client.user.setPresence({ status: "dnd", afk: false, activities: [] });
-  console.log("🔴 Bot presence set to Do Not Disturb");
+  console.log("ð´ Bot presence set to Do Not Disturb");
 }
 
-// ─── Server security ────────────────────────────────────────────────────────
+// âââ Server security ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Security is opt-in per server. Automated security actions only remove roles.
 const SECURITY_DEFAULTS = {
   enabled: false,
@@ -667,12 +667,12 @@ client.on("roleUpdate", async (oldRole, newRole) => {
 async function leaveUnauthorizedGuild(guild, reason = "allowlist enforcement") {
   if (guild.id === PROTECTED_GUILD_ID) return false;
 
-  console.log(`🚪 Leaving unauthorized server ${guild.name} (${guild.id}) — ${reason}`);
+  console.log(`ðª Leaving unauthorized server ${guild.name} (${guild.id}) â ${reason}`);
   try {
     await guild.leave();
     return true;
   } catch (error) {
-    console.error(`❌ Could not leave ${guild.name} (${guild.id}):`, error);
+    console.error(`â Could not leave ${guild.name} (${guild.id}):`, error);
     return false;
   }
 }
@@ -696,14 +696,14 @@ const AUTOMOD_RULE_SPECS = [
 async function ensureAutoMod(guild) {
   const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
   if (!botMember?.permissions.has(PermissionFlagsBits.ManageGuild)) {
-    console.warn("⚠️ AutoMod is not enabled in " + guild.name + ": the bot needs Manage Server.");
+    console.warn("â ï¸ AutoMod is not enabled in " + guild.name + ": the bot needs Manage Server.");
     return { created: 0, existing: 0, failed: AUTOMOD_RULE_SPECS.length, reason: "missing_permission" };
   }
   let rules;
   try {
     rules = await guild.autoModerationRules.fetch();
   } catch (error) {
-    console.error("❌ Could not read AutoMod rules in " + guild.name + ":", error);
+    console.error("â Could not read AutoMod rules in " + guild.name + ":", error);
     return { created: 0, existing: 0, failed: AUTOMOD_RULE_SPECS.length, reason: "fetch_failed" };
   }
   let created = 0;
@@ -711,7 +711,7 @@ async function ensureAutoMod(guild) {
   let failed = 0;
   for (const spec of AUTOMOD_RULE_SPECS) {
     const name = AUTOMOD_RULE_PREFIX + spec.suffix;
-    const isExisting = rules.some(rule => rule.name === name || (spec.suffix === "Mention Spam" && rule.name === "Bot AutoMod • Mention Spam"));
+    const isExisting = rules.some(rule => rule.name === name || (spec.suffix === "Mention Spam" && rule.name === "Bot AutoMod â¢ Mention Spam"));
     if (isExisting) {
       existing++;
       continue;
@@ -723,25 +723,25 @@ async function ensureAutoMod(guild) {
       created++;
     } catch (error) {
       failed++;
-      console.error("❌ Could not create AutoMod rule " + name + " in " + guild.name + ":", error);
+      console.error("â Could not create AutoMod rule " + name + " in " + guild.name + ":", error);
     }
   }
-  console.log("✅ AutoMod checked " + guild.name + ": " + created + " created, " + existing + " already present, " + failed + " failed.");
+  console.log("â AutoMod checked " + guild.name + ": " + created + " created, " + existing + " already present, " + failed + " failed.");
   return { created, existing, failed };
 }
 client.once("clientReady", async c => {
-  console.log(`✅ Logged in as ${c.user.tag}`);
+  console.log(`â Logged in as ${c.user.tag}`);
   markBotActive();
   setInterval(markBotActive, 60 * 1000);
   try {
     await registerSetRankSlashCommand(c.application);
   } catch (error) {
-    console.error("❌ Could not register /setrank slash command:", error);
+    console.error("â Could not register /setrank slash command:", error);
   }
   try {
     await registerRequirementsSlashCommand(c.application);
   } catch (error) {
-    console.error("❌ Could not register /rq add slash command:", error);
+    console.error("â Could not register /rq add slash command:", error);
   }
   resumeGiveaways(client);
   resumeReminders(client);
@@ -754,7 +754,7 @@ client.on("guildCreate", guild => {
   void ensureAutoMod(guild);
 });
 
-// ─── Welcome ───────────────────────────────────────────────────────────────
+// âââ Welcome âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 client.on("guildMemberAdd", async member => {
   const cfg = getConfig(member.guild.id);
   const chId = cfg.welcomeChannel || process.env.WELCOME_CHANNEL_ID;
@@ -770,13 +770,13 @@ client.on("guildMemberAdd", async member => {
       .replace(/{count}/g, member.guild.memberCount)
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = welcomeImageAttachment();
-    const embed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
+    const embed = new EmbedBuilder().setTitle("ð Welcome!").setDescription(formatted).setColor(0x57f287).setThumbnail(member.user.displayAvatarURL());
     if (attachment) embed.setImage("attachment://welcome.png");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Welcome error:", e); }
 });
 
-// ─── Leave ─────────────────────────────────────────────────────────────────
+// âââ Leave âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 client.on("guildMemberRemove", async member => {
   const cfg = getConfig(member.guild.id);
   const chId = cfg.leaveChannel || process.env.LEAVE_CHANNEL_ID;
@@ -792,13 +792,13 @@ client.on("guildMemberRemove", async member => {
       .replace(/{count}/g, member.guild.memberCount)
       .replace(/{membercount}/g, member.guild.memberCount);
     const attachment = leaveImageAttachment();
-    const embed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
+    const embed = new EmbedBuilder().setTitle("ð Member Left").setDescription(formatted).setColor(0xed4245).setThumbnail(member.user.displayAvatarURL());
     if (attachment) embed.setImage("attachment://leave.png");
     await ch.send({ embeds: [embed], files: attachment ? [attachment] : [] });
   } catch(e) { console.error("Leave error:", e); }
 });
 
-// ─── Weekly requirements access ──────────────────────────────────────────────
+// âââ Weekly requirements access ââââââââââââââââââââââââââââââââââââââââââââââ
 function isRequirementsStaff(member) {
   if (!member || member.user?.bot) return false;
   const configuredRoleIds = (process.env.STAFF_ROLE_IDS || process.env.MOD_ROLE_ID || "")
@@ -820,7 +820,7 @@ function isRequirementsStaff(member) {
   );
 }
 
-// ─── Snipe: track deleted messages ─────────────────────────────────────────
+// âââ Snipe: track deleted messages âââââââââââââââââââââââââââââââââââââââââ
 client.on("messageDelete", message => {
   if (message.author?.bot) return;
   if (message.content) {
@@ -833,7 +833,7 @@ client.on("messageDelete", message => {
   }
 });
 
-// ─── AFK: detect when AFK user speaks ─────────────────────────────────────
+// âââ AFK: detect when AFK user speaks âââââââââââââââââââââââââââââââââââââ
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
   if (afkUsers.has(message.author.id) && !message.content.startsWith(PREFIX)) {
@@ -842,18 +842,18 @@ client.on("messageCreate", async message => {
     if (message.member?.nickname?.startsWith("[AFK] ")) {
       await message.member.setNickname(nick || null).catch(() => {});
     }
-    const m = await message.reply(`👋 Welcome back, **${message.author.username}**! Your AFK has been removed.`).catch(()=>null);
+    const m = await message.reply(`ð Welcome back, **${message.author.username}**! Your AFK has been removed.`).catch(()=>null);
     if (m) setTimeout(() => m.delete().catch(()=>{}), 5000);
   }
   for (const user of message.mentions.users.values()) {
     if (afkUsers.has(user.id)) {
       const { reason, since } = afkUsers.get(user.id);
-      await message.reply(`💤 **${user.username}** is AFK: ${reason} (since <t:${Math.floor(since/1000)}:R>)`).catch(()=>{});
+      await message.reply(`ð¤ **${user.username}** is AFK: ${reason} (since <t:${Math.floor(since/1000)}:R>)`).catch(()=>{});
     }
   }
 });
 
-// ─── Anti-link protection ──────────────────────────────────────────────────
+// âââ Anti-link protection ââââââââââââââââââââââââââââââââââââââââââââââââââ
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild || !LINK_PATTERN.test(message.content)) return;
   const cfg = getConfig(message.guild.id);
@@ -863,13 +863,13 @@ client.on("messageCreate", async message => {
 
   await message.delete().catch(() => {});
   const notice = await message.channel.send({
-    content: `🚫 ${message.author}, links are not allowed in this channel.`,
+    content: `ð« ${message.author}, links are not allowed in this channel.`,
     allowedMentions: { users: [message.author.id] },
   }).catch(() => null);
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
 });
 
-// ─── Interactions (Buttons & Select Menus) ─────────────────────────────────
+// âââ Interactions (Buttons & Select Menus) âââââââââââââââââââââââââââââââââ
 client.on("interactionCreate", async interaction => {
   if (interaction.isAutocomplete() && interaction.commandName === "setrank") {
     if (!interaction.guild) return interaction.respond([]);
@@ -908,7 +908,7 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: "I couldn't find your member record in this server.", ephemeral: true });
     }
     if (!isRequirementsStaff(member)) {
-      return interaction.reply({ content: "⛔ Only staff can add to weekly requirements.", ephemeral: true });
+      return interaction.reply({ content: "â Only staff can add to weekly requirements.", ephemeral: true });
     }
     await interaction.reply({
       content: "Choose what you completed. Each button adds exactly +1 to your own weekly total.",
@@ -933,7 +933,7 @@ client.on("interactionCreate", async interaction => {
     }
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member || !isRequirementsStaff(member)) {
-      return interaction.reply({ content: "⛔ Only staff can add to weekly requirements.", ephemeral: true });
+      return interaction.reply({ content: "â Only staff can add to weekly requirements.", ephemeral: true });
     }
     const recorded = requirementsTracker.recordEvent({
       key: "manual:" + interaction.id,
@@ -947,7 +947,7 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: "I couldn't record that addition. Please try again.", ephemeral: true });
     }
     await interaction.update({
-      content: "✅ Added +1 " + labels[type] + ". Click a button again to log another one.",
+      content: "â Added +1 " + labels[type] + ". Click a button again to log another one.",
       embeds: [buildWeeklyRequirementsEmbed(member)],
       components: buildRequirementAddComponents(interaction.user.id),
     });
@@ -961,7 +961,7 @@ client.on("interactionCreate", async interaction => {
     await interaction.deferReply({ ephemeral: true });
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member) {
-      return interaction.editReply("❌ I couldn't find your member record in this server.");
+      return interaction.editReply("â I couldn't find your member record in this server.");
     }
     const message = {
       author: interaction.user,
@@ -978,7 +978,7 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
-  // ── Giveaway button ──
+  // ââ Giveaway button ââ
 
 
   if (interaction.isButton() && interaction.customId === GIVEAWAY_BTN) {
@@ -995,22 +995,22 @@ client.on("interactionCreate", async interaction => {
       const MAX_SHOW = 40;
       const mentions = updatedParticipants.slice(0, MAX_SHOW).map(id => `<@${id}>`).join(", ");
       const overflow = updatedParticipants.length > MAX_SHOW ? ` +${updatedParticipants.length - MAX_SHOW} more` : "";
-      const participantField = { name: `🎟️ Entries — ${updatedParticipants.length}`, value: mentions + overflow, inline: false };
+      const participantField = { name: `ðï¸ Entries â ${updatedParticipants.length}`, value: mentions + overflow, inline: false };
 
       // Rebuild embed, replacing any existing entries field
       const updatedEmbed = EmbedBuilder.from(oldEmbed);
-      const fields = (oldEmbed.fields || []).filter(f => !f.name.startsWith("🎟️ Entries"));
+      const fields = (oldEmbed.fields || []).filter(f => !f.name.startsWith("ðï¸ Entries"));
       updatedEmbed.setFields([...fields, participantField]);
 
       await interaction.update({ embeds: [updatedEmbed], components: interaction.message.components });
     } catch(e) {
       console.error("Giveaway panel update error:", e);
-      await interaction.reply({ content: "🎉 You're entered in the giveaway!", ephemeral: true });
+      await interaction.reply({ content: "ð You're entered in the giveaway!", ephemeral: true });
     }
     return;
   }
 
-  // ── Verification button ──
+  // ââ Verification button ââ
   if (interaction.isButton() && interaction.customId === VERIFY_BTN) {
     const cfg = getConfig(interaction.guild.id);
     const verifiedRole = cfg.verifiedRole
@@ -1031,15 +1031,15 @@ client.on("interactionCreate", async interaction => {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member) return interaction.reply({ content: "I couldn't find your server member profile.", ephemeral: true });
     if (member.roles.cache.has(verifiedRole.id)) {
-      return interaction.reply({ content: "✅ You are already verified.", ephemeral: true });
+      return interaction.reply({ content: "â You are already verified.", ephemeral: true });
     }
     await member.roles.add(verifiedRole, "Clicked the verification panel");
-    return interaction.reply({ content: `✅ You are verified and received **${verifiedRole.name}**.`, ephemeral: true });
+    return interaction.reply({ content: `â You are verified and received **${verifiedRole.name}**.`, ephemeral: true });
   }
 
 });
 
-// ─── Commands ───────────────────────────────────────────────────────────────
+// âââ Commands âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 async function handleCommandMessage(message) {
   if (message.author.bot || !message.guild) return;
   if (!message.content) {
@@ -1050,7 +1050,13 @@ async function handleCommandMessage(message) {
   }
   const content = message.content.trim();
   if (!content.startsWith(PREFIX)) return;
-  const args = content.slice(PREFIX.length).trim().split(/\s+/);
+  const commandBody = content.slice(PREFIX.length).trim();
+  // Accept a custom emoji immediately after !steal even when the user omits the space.
+  const inlineEmojiSteal = commandBody.match(/^steal(?=<a?:[\w~]+:\d+>)/i);
+  const normalizedCommandBody = inlineEmojiSteal
+    ? "steal " + commandBody.slice("steal".length)
+    : commandBody;
+  const args = normalizedCommandBody.split(/\s+/);
   const cmd = args.shift()?.toLowerCase();
   if (!cmd) return;
   console.log(`[command-diagnostics] Received !${cmd}`);
@@ -1058,7 +1064,7 @@ async function handleCommandMessage(message) {
 
   let targetUser = message.mentions.users.first() || null;
   let targetMember = targetUser ? await message.guild.members.fetch(targetUser.id).catch(()=>null) : null;
-  // Fall back to a raw user ID (e.g. `!ban 123456789012345678 spam`) — needed
+  // Fall back to a raw user ID (e.g. `!ban 123456789012345678 spam`) â needed
   // because you can't @mention someone who already left the server.
   if (!targetUser && /^\d{17,19}$/.test(args[0] || "")) {
     targetMember = await message.guild.members.fetch(args[0]).catch(() => null);
@@ -1079,7 +1085,7 @@ async function handleCommandMessage(message) {
           return void message.reply("I couldn't find your member record in this server.");
         }
         if (!isRequirementsStaff(member)) {
-          return void message.reply("⛔ Only staff can add to weekly requirements.");
+          return void message.reply("â Only staff can add to weekly requirements.");
         }
         return void message.reply({
           content: "Choose what you completed. Each button adds exactly +1 to your own weekly total.",
@@ -1094,7 +1100,7 @@ async function handleCommandMessage(message) {
         if (subcommand === "check") {
           const member = message.member;
           if (!isRequirementsStaff(member)) {
-            return void message.reply("⛔ Only staff can check weekly requirements.");
+            return void message.reply("â Only staff can check weekly requirements.");
           }
           return void message.reply({
             embeds: [buildWeeklyRequirementsEmbed(member)],
@@ -1107,10 +1113,10 @@ async function handleCommandMessage(message) {
             !permissions?.has(PermissionFlagsBits.ManageGuild) &&
             !permissions?.has(PermissionFlagsBits.Administrator)
           ) {
-            return void message.reply("⛔ You need Manage Server permission to reset this server's weekly requirements.");
+            return void message.reply("â You need Manage Server permission to reset this server's weekly requirements.");
           }
           const cleared = requirementsTracker.resetGuild(message.guild.id);
-          return void message.reply("✅ Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
+          return void message.reply("â Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
         }
         return void message.reply("Usage: !requirements check or !requirements reset (Manage Server)");
       }
@@ -1120,10 +1126,10 @@ async function handleCommandMessage(message) {
           !permissions?.has(PermissionFlagsBits.ManageGuild) &&
           !permissions?.has(PermissionFlagsBits.Administrator)
         ) {
-          return void message.reply("⛔ You need Manage Server permission to reset this server's weekly requirements.");
+          return void message.reply("â You need Manage Server permission to reset this server's weekly requirements.");
         }
         const cleared = requirementsTracker.resetGuild(message.guild.id);
-        return void message.reply("✅ Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
+        return void message.reply("â Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
       }
 
       case "setrank": {
@@ -1131,15 +1137,15 @@ async function handleCommandMessage(message) {
         if (!hasRankersRole) {
           const moderatorRoleId = process.env.MOD_ROLE_ID?.trim();
           if (!moderatorRoleId || !/^[0-9]+$/.test(moderatorRoleId)) {
-            return void message.reply("❌ The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
+            return void message.reply("â The configured moderator role is missing or invalid. Set MOD_ROLE_ID in Railway.");
           }
           if (!message.guild.roles.cache.has(moderatorRoleId)) {
-            return void message.reply("❌ The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
+            return void message.reply("â The configured moderator role was not found in this Discord server. Check MOD_ROLE_ID in Railway.");
           }
           if (!message.member?.roles.cache.has(moderatorRoleId)) {
             const denial = message.isSlashCommand
-              ? "⛔ You need the Rankers role or configured moderator role to use /setrank."
-              : "⛔ You need the Rankers role or configured moderator role to use !setrank.";
+              ? "â You need the Rankers role or configured moderator role to use /setrank."
+              : "â You need the Rankers role or configured moderator role to use !setrank.";
             return void message.reply(denial);
           }
         }
@@ -1155,10 +1161,10 @@ async function handleCommandMessage(message) {
         if (!apiKey) missingConfig.push("ROBLOX_API_KEY");
         if (!groupId) missingConfig.push("ROBLOX_GROUP_ID");
         if (missingConfig.length) {
-          return void message.reply("❌ Set these Railway variables before using this command: " + missingConfig.join(", ") + ".");
+          return void message.reply("â Set these Railway variables before using this command: " + missingConfig.join(", ") + ".");
         }
         if (!/^[0-9]+$/.test(groupId)) {
-          return void message.reply("❌ ROBLOX_GROUP_ID must be the numeric ID of your Roblox group.");
+          return void message.reply("â ROBLOX_GROUP_ID must be the numeric ID of your Roblox group.");
         }
 
         let operation = "username lookup";
@@ -1207,7 +1213,7 @@ async function handleCommandMessage(message) {
           const userLookup = await readRobloxJson(userResponse);
           const robloxUser = Array.isArray(userLookup.data) ? userLookup.data.find(user => user && user.id != null) : null;
           if (!robloxUser) {
-            return void message.reply("❌ I couldn't find the Roblox username **" + robloxUsername + "**.");
+            return void message.reply("â I couldn't find the Roblox username **" + robloxUsername + "**.");
           }
 
           operation = "group membership and role lookup";
@@ -1243,17 +1249,17 @@ async function handleCommandMessage(message) {
           if (roleMatches.length > 1) {
             const choices = roleMatches
               .slice(0, 5)
-              .map(role => "• " + String(role.displayName || "Unnamed role"))
+              .map(role => "â¢ " + String(role.displayName || "Unnamed role"))
               .join("\n");
-            const more = roleMatches.length > 5 ? "\n• …" : "";
+            const more = roleMatches.length > 5 ? "\nâ¢ â¦" : "";
             return void message.reply({
-              content: "❓ That name matches multiple Roblox ranks. Use a more specific name:\n" + choices + more,
+              content: "â That name matches multiple Roblox ranks. Use a more specific name:\n" + choices + more,
               allowedMentions: { parse: [] },
             });
           }
           if (!roleMatches.length) {
             return void message.reply({
-              content: "❌ I couldn't find a Roblox group role matching that name. Try the full rank name or a unique part, like free access.",
+              content: "â I couldn't find a Roblox group role matching that name. Try the full rank name or a unique part, like free access.",
               allowedMentions: { parse: [] },
             });
           }
@@ -1264,7 +1270,7 @@ async function handleCommandMessage(message) {
             const joinRequests = await listAll(groupPath + "/join-requests", "groupJoinRequests", 20, userFilter);
             const pendingRequest = joinRequests.find(entry => entry && entry.user === "users/" + robloxUser.id);
             if (!pendingRequest) {
-              return void message.reply("❌ **" + (robloxUser.name || robloxUsername) + "** is not a member and has no pending join request in the configured Roblox group.");
+              return void message.reply("â **" + (robloxUser.name || robloxUsername) + "** is not a member and has no pending join request in the configured Roblox group.");
             }
 
             const requestPath = typeof pendingRequest.path === "string" ? pendingRequest.path : "";
@@ -1287,7 +1293,7 @@ async function handleCommandMessage(message) {
               if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 500));
             }
             if (!membership) {
-              return void message.reply("✅ Accepted the join request for **" + (robloxUser.name || robloxUsername) + "**, but Roblox has not made the membership available yet. Run !setrank or /setrank again in a few seconds to assign the role.");
+              return void message.reply("â Accepted the join request for **" + (robloxUser.name || robloxUsername) + "**, but Roblox has not made the membership available yet. Run !setrank or /setrank again in a few seconds to assign the role.");
             }
           }
           const membershipPath = typeof membership.path === "string" ? membership.path : "";
@@ -1321,12 +1327,12 @@ async function handleCommandMessage(message) {
                 : status === 429
                   ? "Roblox rate-limited removal of the previous role; check the member's roles and retry."
                   : "Check the member's roles and Roblox group:write access before retrying.";
-              return void message.reply("⚠️ Roblox assigned **" + targetRole.displayName + "** to **" + (robloxUser.name || robloxUsername) + "**, but couldn't remove the previous rank" + (previousRole?.displayName ? " (" + previousRole.displayName + ")" : "") + ". The user may temporarily hold both roles. " + cleanupHelp);
+              return void message.reply("â ï¸ Roblox assigned **" + targetRole.displayName + "** to **" + (robloxUser.name || robloxUsername) + "**, but couldn't remove the previous rank" + (previousRole?.displayName ? " (" + previousRole.displayName + ")" : "") + ". The user may temporarily hold both roles. " + cleanupHelp);
             }
           }
 
           const embed = new EmbedBuilder()
-            .setTitle(acceptedJoinRequest ? "✅ Roblox Request Accepted & Ranked" : "✅ Roblox Rank Changed")
+            .setTitle(acceptedJoinRequest ? "â Roblox Request Accepted & Ranked" : "â Roblox Rank Changed")
             .setColor(0x57f287)
             .addFields(
               { name: "Roblox Username", value: robloxUser.name || robloxUsername, inline: true },
@@ -1353,14 +1359,14 @@ async function handleCommandMessage(message) {
           const acceptedNote = acceptedJoinRequest
             ? " The join request was accepted, but role assignment did not finish. Run the same command again to retry the rank."
             : "";
-          await message.reply("❌ " + explanation + acceptedNote).catch(() => {});
+          await message.reply("â " + explanation + acceptedNote).catch(() => {});
         }
         break;
       }
 
       case "react": {
         if (message.author.id !== OWNER_ID) {
-          return void message.reply("🚫 This command is locked — only the bot owner can use it.");
+          return void message.reply("ð« This command is locked â only the bot owner can use it.");
         }
 
         const messageId = args[0];
@@ -1384,41 +1390,41 @@ async function handleCommandMessage(message) {
             } catch {}
           }
           if (!targetMessage) {
-            return void message.reply("❌ I could not find that message in a channel I can access.");
+            return void message.reply("â I could not find that message in a channel I can access.");
           }
           const customEmoji = reaction.match(/^<a?:[\w~]+:(\d+)>$/);
           await targetMessage.react(customEmoji ? customEmoji[1] : reaction);
-          await message.reply("✅ Reacted to the message with " + reaction + ".");
+          await message.reply("â Reacted to the message with " + reaction + ".");
         } catch (error) {
           console.error("Failed to react to message:", error);
-          await message.reply("❌ I could not react to that message. Check the message ID, emoji, and my access to the message.");
+          await message.reply("â I could not react to that message. Check the message ID, emoji, and my access to the message.");
         }
       }
 
       case "roleicon": {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-          return void message.reply("❌ You need **Administrator** permission to use this command.");
+          return void message.reply("â You need **Administrator** permission to use this command.");
         }
 
         const role = message.mentions.roles.first();
         const icon = args.find(argument => !/^<@&\d+>$/.test(argument));
         if (!role || !icon) {
-          return void message.reply("❌ Usage: `!roleicon @Role :emoji:`");
+          return void message.reply("â Usage: `!roleicon @Role :emoji:`");
         }
         if (role.managed) {
-          return void message.reply("❌ That role is managed by an integration and cannot be edited.");
+          return void message.reply("â That role is managed by an integration and cannot be edited.");
         }
 
         const botMember = message.guild.members.me;
         if (!botMember) {
-          return void message.reply("❌ I couldn't find my bot member.");
+          return void message.reply("â I couldn't find my bot member.");
         }
         if (
           !botMember.permissions.has(PermissionFlagsBits.ManageRoles) ||
           role.position >= botMember.roles.highest.position
         ) {
           return void message.reply(
-            "❌ My bot role must have **Manage Roles** permission and be **above** the role you're trying to edit.",
+            "â My bot role must have **Manage Roles** permission and be **above** the role you're trying to edit.",
           );
         }
 
@@ -1429,30 +1435,30 @@ async function handleCommandMessage(message) {
               `https://cdn.discordapp.com/emojis/${customEmoji[1]}.png`,
             );
             if (!response.ok) {
-              return void message.reply("❌ I couldn't download that Discord emoji.");
+              return void message.reply("â I couldn't download that Discord emoji.");
             }
             await role.edit({ icon: Buffer.from(await response.arrayBuffer()) });
           } else {
             await role.edit({ unicodeEmoji: icon });
           }
-          await message.reply(`✅ ${role} icon changed to ${icon}`);
+          await message.reply(`â ${role} icon changed to ${icon}`);
         } catch (error) {
           console.error("Failed to change role icon:", error);
           await message.reply(
-            "❌ I couldn't change the role icon. Check the bot permissions, role order, and whether this server supports role icons.",
+            "â I couldn't change the role icon. Check the bot permissions, role order, and whether this server supports role icons.",
           );
         }
         break;
       }
       case "ping": {
         const sent = await message.reply("Pinging...");
-        sent.edit(`🏓 Pong! Latency: **${sent.createdTimestamp - message.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**`);
+        sent.edit(`ð Pong! Latency: **${sent.createdTimestamp - message.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**`);
         break;
       }
       case "botinfo": {
         const infoImage = botImageAttachment();
         const embed = new EmbedBuilder()
-          .setTitle(`🤖 ${KOC_BRAND} Bot Info`)
+          .setTitle(`ð¤ ${KOC_BRAND} Bot Info`)
           .setThumbnail(infoImage ? "attachment://662.png" : client.user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
@@ -1469,13 +1475,13 @@ async function handleCommandMessage(message) {
         break;
       }
       case "uptime":
-        await message.reply(`⏱️ Bot has been online for **${formatUptime(Date.now() - startTime)}**`);
+        await message.reply(`â±ï¸ Bot has been online for **${formatUptime(Date.now() - startTime)}**`);
         break;
       case "userinfo": {
         const user = targetUser || message.author;
         const member = targetMember || message.member;
         const embed = new EmbedBuilder()
-          .setTitle(`👤 ${user.tag}`)
+          .setTitle(`ð¤ ${user.tag}`)
           .setThumbnail(user.displayAvatarURL({ size: 256 }))
           .setColor(0x5865f2)
           .addFields(
@@ -1492,7 +1498,7 @@ async function handleCommandMessage(message) {
         const g = message.guild;
         await g.fetch();
         const embed = new EmbedBuilder()
-          .setTitle(`🏠 ${g.name}`)
+          .setTitle(`ð  ${g.name}`)
           .setThumbnail(g.iconURL({ size: 256 }) || null)
           .setColor(0x5865f2)
           .addFields(
@@ -1508,21 +1514,21 @@ async function handleCommandMessage(message) {
       }
       case "avatar": {
         const user = targetUser || message.author;
-        await message.reply({ embeds: [new EmbedBuilder().setTitle(`🖼️ ${user.tag}'s Avatar`).setImage(user.displayAvatarURL({ size: 512 })).setColor(0x5865f2)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle(`ð¼ï¸ ${user.tag}'s Avatar`).setImage(user.displayAvatarURL({ size: 512 })).setColor(0x5865f2)] });
         break;
       }
       case "membercount":
-        await message.reply(`👥 **${message.guild.name}** has **${message.guild.memberCount}** members.`);
+        await message.reply(`ð¥ **${message.guild.name}** has **${message.guild.memberCount}** members.`);
         break;
 
-      // ── Utility ──────────────────────────────────────────────────────────
+      // ââ Utility ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "poll": {
         const parts = message.content.slice(PREFIX.length + "poll".length).trim().split("|").map(p=>p.trim()).filter(Boolean);
         if (parts.length < 3) return void message.reply("Usage: `!poll Question? | Option 1 | Option 2`");
         const [question, ...options] = parts;
         if (options.length > 5) return void message.reply("Max 5 options per poll.");
         const embed = new EmbedBuilder()
-          .setTitle(`📊 ${question}`)
+          .setTitle(`ð ${question}`)
           .setDescription(options.map((o,i)=>`${NUMBER_EMOJI[i]} ${o}`).join("\n"))
           .setColor(0x5865f2)
           .setFooter({ text: `Poll by ${message.author.tag}` });
@@ -1533,30 +1539,30 @@ async function handleCommandMessage(message) {
       }
       case "math": {
         const expr = args.join(" ");
-        if (!expr) return void message.reply("Usage: `!math <expression>` — e.g. `!math 5^2 + 3*4`");
+        if (!expr) return void message.reply("Usage: `!math <expression>` â e.g. `!math 5^2 + 3*4`");
         const result = safeMath(expr);
-        if (result === null) return void message.reply("❌ Invalid or unsafe expression. Only numbers and `+ - * / % ^ ( )` allowed.");
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🧮 Math").setDescription(`**Expression:** \`${expr}\`\n**Result:** \`${result}\``).setColor(0x5865f2)] });
+        if (result === null) return void message.reply("â Invalid or unsafe expression. Only numbers and `+ - * / % ^ ( )` allowed.");
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("ð§® Math").setDescription(`**Expression:** \`${expr}\`\n**Result:** \`${result}\``).setColor(0x5865f2)] });
         break;
       }
       case "remind": {
         const timeStr = args[0];
         const reminderText = args.slice(1).join(" ");
-        if (!timeStr || !reminderText) return void message.reply("Usage: `!remind <time> <message>` — e.g. `!remind 10m Take a break`");
+        if (!timeStr || !reminderText) return void message.reply("Usage: `!remind <time> <message>` â e.g. `!remind 10m Take a break`");
         const ms = parseDuration(timeStr);
         if (!ms) return void message.reply("Invalid time. Use: `10s`, `5m`, `2h`, `1d`");
         if (ms > 86400000 * 7) return void message.reply("Max reminder time is 7 days.");
         const r = { id: `${Date.now()}-${message.author.id}`, userId: message.author.id, channelId: message.channel.id, guildName: message.guild.name, reminder: reminderText, dueAt: new Date(Date.now() + ms).toISOString() };
         reminders.add(r);
         scheduleReminder(client, r);
-        await message.reply(`✅ Got it! I'll remind you about **${reminderText}** in **${timeStr}**.`);
+        await message.reply(`â Got it! I'll remind you about **${reminderText}** in **${timeStr}**.`);
         break;
       }
       case "s": case "snipe": {
         const data = sniped.get(message.channel.id);
         if (!data) return void message.reply("Nothing to snipe! No recently deleted messages in this channel.");
         const embed = new EmbedBuilder()
-          .setTitle("🔫 Sniped!")
+          .setTitle("ð« Sniped!")
           .setDescription(data.content)
           .setColor(0xed4245)
           .setAuthor({ name: data.author, iconURL: data.avatarURL || undefined })
@@ -1572,16 +1578,16 @@ async function handleCommandMessage(message) {
         if (!baseName.startsWith("[AFK] ")) {
           await message.member.setNickname(`[AFK] ${baseName}`.slice(0, 32)).catch(() => {});
         }
-        await message.reply(`💤 You're now AFK: **${reason}**`);
+        await message.reply(`ð¤ You're now AFK: **${reason}**`);
         break;
       }
 
-      // ── KOC Kill Ops City Casino ───────────────────────────────────────────────────────
+      // ââ KOC Kill Ops City Casino âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "balance": case "bal": {
         const user = targetUser || message.author;
         const acc = economy.get(message.guild.id, user.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle(`💳 ${user.username}'s Balance`)
+          .setTitle(`ð³ ${user.username}'s Balance`)
           .addFields(
             { name: "Wallet (stealable)", value: fmtMoney(acc.balance), inline: true },
             { name: "Bank (safe)", value: fmtMoney(acc.bank), inline: true },
@@ -1592,8 +1598,8 @@ async function handleCommandMessage(message) {
       case "bank": {
         const acc = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🏦 Your Bank")
-          .setDescription(`${fmtMoney(acc.bank)} stored safely — this can't be stolen.\nWallet: ${fmtMoney(acc.balance)}`)
+          .setTitle("ð¦ Your Bank")
+          .setDescription(`${fmtMoney(acc.bank)} stored safely â this can't be stolen.\nWallet: ${fmtMoney(acc.balance)}`)
           .setColor(0x5865f2)] });
         break;
       }
@@ -1604,7 +1610,7 @@ async function handleCommandMessage(message) {
         if (amount > acc.balance) return void message.reply(`You only have ${fmtMoney(acc.balance)} in your wallet.`);
         const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance - amount, bank: acc.bank + amount });
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🏦 Deposited")
+          .setTitle("ð¦ Deposited")
           .setDescription(`Moved **${fmtMoney(amount)}** into your bank.\nWallet: ${fmtMoney(updated.balance)} | Bank: ${fmtMoney(updated.bank)}`)
           .setColor(0x57f287)] });
         break;
@@ -1616,7 +1622,7 @@ async function handleCommandMessage(message) {
         if (amount > acc.bank) return void message.reply(`You only have ${fmtMoney(acc.bank)} in your bank.`);
         const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, bank: acc.bank - amount });
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🏦 Withdrew")
+          .setTitle("ð¦ Withdrew")
           .setDescription(`Moved **${fmtMoney(amount)}** back into your wallet.\nWallet: ${fmtMoney(updated.balance)} | Bank: ${fmtMoney(updated.bank)}`)
           .setColor(0x57f287)] });
         break;
@@ -1625,13 +1631,13 @@ async function handleCommandMessage(message) {
         const acc = economy.get(message.guild.id, message.author.id);
         const cooldown = 900000; // 15 min
         const remaining = acc.lastGrab + cooldown - Date.now();
-        if (remaining > 0) return void message.reply(`⏳ Nothing new to find yet. Try again in **${formatUptime(remaining)}**.`);
+        if (remaining > 0) return void message.reply(`â³ Nothing new to find yet. Try again in **${formatUptime(remaining)}**.`);
         const roll = Math.random();
         if (roll < 0.15) {
-          // Whiff — found nothing this time.
+          // Whiff â found nothing this time.
           economy.set(message.guild.id, message.author.id, { lastGrab: Date.now() });
-          const misses = ["You checked the couch cushions and found lint.","You looked around but came up empty-handed.","Someone beat you to it — no luck this time."];
-          await message.reply({ embeds: [new EmbedBuilder().setTitle("🔍 Nothing Found").setDescription(misses[Math.floor(Math.random()*misses.length)]).setColor(0x99aab5)] });
+          const misses = ["You checked the couch cushions and found lint.","You looked around but came up empty-handed.","Someone beat you to it â no luck this time."];
+          await message.reply({ embeds: [new EmbedBuilder().setTitle("ð Nothing Found").setDescription(misses[Math.floor(Math.random()*misses.length)]).setColor(0x99aab5)] });
           break;
         }
         const jackpot = roll > 0.97; // rare big find
@@ -1641,7 +1647,7 @@ async function handleCommandMessage(message) {
           : ["You found some loose change on the ground.","You found a few crumpled bills in your pocket.","You found some coins in a vending machine tray.","You found a bit of cash on the sidewalk."];
         const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastGrab: Date.now() });
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle(jackpot ? "🤑 Jackpot Find!" : "🔍 Found Money!")
+          .setTitle(jackpot ? "ð¤ Jackpot Find!" : "ð Found Money!")
           .setDescription(`${finds[Math.floor(Math.random()*finds.length)]}\nYou grabbed **${fmtMoney(amount)}**!\nWallet: ${fmtMoney(updated.balance)}`)
           .setColor(jackpot ? 0xffd700 : 0x57f287)] });
         break;
@@ -1650,22 +1656,22 @@ async function handleCommandMessage(message) {
         const acc = economy.get(message.guild.id, message.author.id);
         const cooldown = 86400000;
         const remaining = acc.lastDaily + cooldown - Date.now();
-        if (remaining > 0) return void message.reply(`⏳ You already claimed your daily. Come back in **${formatUptime(remaining)}**.`);
+        if (remaining > 0) return void message.reply(`â³ You already claimed your daily. Come back in **${formatUptime(remaining)}**.`);
         const amount = 100 + Math.floor(Math.random() * 201); // 100-300
         const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastDaily: Date.now() });
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("📅 Daily Claimed!").setDescription(`You got **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("ð Daily Claimed!").setDescription(`You got **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
         break;
       }
       case "work": {
         const acc = economy.get(message.guild.id, message.author.id);
         const cooldown = 3600000;
         const remaining = acc.lastWork + cooldown - Date.now();
-        if (remaining > 0) return void message.reply(`⏳ You're tired. Rest for **${formatUptime(remaining)}** before working again.`);
+        if (remaining > 0) return void message.reply(`â³ You're tired. Rest for **${formatUptime(remaining)}** before working again.`);
         const jobs = ["ran a package for a plug","flipped some sneakers","hustled a car wash","did a food delivery run","fixed someone's PC","sold merch outside the venue"];
         const job = jobs[Math.floor(Math.random() * jobs.length)];
         const amount = 50 + Math.floor(Math.random() * 101); // 50-150
         const updated = economy.set(message.guild.id, message.author.id, { balance: acc.balance + amount, lastWork: Date.now() });
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("💼 Work Complete").setDescription(`You ${job} and earned **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("ð¼ Work Complete").setDescription(`You ${job} and earned **${fmtMoney(amount)}**!\nBalance: ${fmtMoney(updated.balance)}`).setColor(0x57f287)] });
         break;
       }
       case "give": case "pay": {
@@ -1678,7 +1684,7 @@ async function handleCommandMessage(message) {
         if (acc.balance < amount) return void message.reply(`You don't have enough. Balance: ${fmtMoney(acc.balance)}`);
         economy.add(message.guild.id, message.author.id, -amount);
         economy.add(message.guild.id, user.id, amount);
-        await message.reply(`✅ Sent **${fmtMoney(amount)}** to ${user}.`);
+        await message.reply(`â Sent **${fmtMoney(amount)}** to ${user}.`);
         break;
       }
       case "steal": {
@@ -1688,7 +1694,7 @@ async function handleCommandMessage(message) {
         if (customEmoji) {
           const botMember = message.guild.members.me;
           if (!botMember?.permissions.has(PermissionFlagsBits.ManageGuildExpressions)) {
-            return void message.reply("❌ I need **Manage Expressions** permission to add emojis to this server.");
+            return void message.reply("â I need **Manage Expressions** permission to add emojis to this server.");
           }
 
           const [, , emojiName, emojiId] = customEmoji;
@@ -1696,7 +1702,7 @@ async function handleCommandMessage(message) {
           const requestedName = args[1] || emojiName;
           const safeName = requestedName.replace(/[^\w~]/g, "").slice(0, 32);
           if (!safeName) {
-            return void message.reply("❌ Use a valid emoji name containing letters, numbers, underscores, or tildes.");
+            return void message.reply("â Use a valid emoji name containing letters, numbers, underscores, or tildes.");
           }
 
           try {
@@ -1705,10 +1711,10 @@ async function handleCommandMessage(message) {
               name: safeName,
               reason: "Copied by " + message.author.tag + " with !steal",
             });
-            await message.reply("✅ " + createdEmoji + " added with the name **\"" + safeName + "\"**.");
+            await message.reply("â " + createdEmoji + " added with the name **\"" + safeName + "\"**.");
           } catch (error) {
             console.error("Failed to steal emoji:", error);
-            await message.reply("❌ I couldn't add that emoji. Check the server's emoji slots, the emoji format, and my Manage Expressions permission.");
+            await message.reply("â I couldn't add that emoji. Check the server's emoji slots, the emoji format, and my Manage Expressions permission.");
           }
           break;
         }
@@ -1719,24 +1725,24 @@ async function handleCommandMessage(message) {
         const thief = economy.get(message.guild.id, message.author.id);
         const cooldown = 1800000; // 30 min
         const remaining = thief.lastSteal + cooldown - Date.now();
-        if (remaining > 0) return void message.reply(`⏳ Lay low for **${formatUptime(remaining)}** before your next heist.`);
+        if (remaining > 0) return void message.reply(`â³ Lay low for **${formatUptime(remaining)}** before your next heist.`);
         const victim = economy.get(message.guild.id, user.id);
         economy.set(message.guild.id, message.author.id, { lastSteal: Date.now() });
-        if (victim.balance < 50) return void message.reply(`${user.username}'s wallet is thin (their bank is safe) — nothing worth stealing.`);
+        if (victim.balance < 50) return void message.reply(`${user.username}'s wallet is thin (their bank is safe) â nothing worth stealing.`);
         const success = Math.random() < 0.4; // 40% success
         if (success) {
           const amount = Math.floor(victim.balance * (0.1 + Math.random() * 0.25)); // 10-35%
           economy.add(message.guild.id, user.id, -amount);
           economy.add(message.guild.id, message.author.id, amount);
           await message.reply({ embeds: [new EmbedBuilder()
-            .setTitle("🕶️ Heist Successful!")
+            .setTitle("ð¶ï¸ Heist Successful!")
             .setDescription(`You stole **${fmtMoney(amount)}** from ${user}!`)
             .setColor(0x57f287)], allowedMentions: { parse: [] } });
         } else {
           const fine = Math.floor(50 + Math.random() * 150);
           economy.add(message.guild.id, message.author.id, -fine);
           await message.reply({ embeds: [new EmbedBuilder()
-            .setTitle("🚨 Caught!")
+            .setTitle("ð¨ Caught!")
             .setDescription(`You got caught trying to rob ${user} and paid a **${fmtMoney(fine)}** fine.`)
             .setColor(0xed4245)], allowedMentions: { parse: [] } });
         }
@@ -1753,8 +1759,8 @@ async function handleCommandMessage(message) {
         economy.add(message.guild.id, message.author.id, win ? bet : -bet);
         const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🪙 Coinflip")
-          .setDescription(`It landed on **${result}**!\n${win ? `You won **${fmtMoney(bet)}**! 🎉` : `You lost **${fmtMoney(bet)}**. 😢`}\nBalance: ${fmtMoney(updated.balance)}`)
+          .setTitle("ðª Coinflip")
+          .setDescription(`It landed on **${result}**!\n${win ? `You won **${fmtMoney(bet)}**! ð` : `You lost **${fmtMoney(bet)}**. ð¢`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(win ? 0x57f287 : 0xed4245)] });
         break;
       }
@@ -1763,22 +1769,22 @@ async function handleCommandMessage(message) {
         const bet = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
         if (!bet || bet < 1) return void message.reply("Usage: `!slots <amount|all>`");
         if (bet > acc.balance) return void message.reply(`You don't have that much. Balance: ${fmtMoney(acc.balance)}`);
-        const symbols = ["🍒","🍋","🍊","🍇","⭐","💎","7️⃣"];
+        const symbols = ["ð","ð","ð","ð","â­","ð","7ï¸â£"];
         const s = () => symbols[Math.floor(Math.random() * symbols.length)];
         const [a, b, c] = [s(), s(), s()];
-        const jackpot = a === b && b === c && a === "7️⃣";
+        const jackpot = a === b && b === c && a === "7ï¸â£";
         const win3 = a === b && b === c;
         const win2 = a === b || b === c || a === c;
         let multiplier = 0, resultText;
-        if (jackpot) { multiplier = 10; resultText = "🎉 **JACKPOT!!! 10x payout!**"; }
-        else if (win3) { multiplier = 4; resultText = "🎊 **Three of a kind! 4x payout!**"; }
-        else if (win2) { multiplier = 1.5; resultText = "✨ **Two of a kind! 1.5x payout!**"; }
-        else { multiplier = -1; resultText = "❌ **No match. You lose your bet.**"; }
+        if (jackpot) { multiplier = 10; resultText = "ð **JACKPOT!!! 10x payout!**"; }
+        else if (win3) { multiplier = 4; resultText = "ð **Three of a kind! 4x payout!**"; }
+        else if (win2) { multiplier = 1.5; resultText = "â¨ **Two of a kind! 1.5x payout!**"; }
+        else { multiplier = -1; resultText = "â **No match. You lose your bet.**"; }
         const delta = Math.floor(bet * multiplier);
         economy.add(message.guild.id, message.author.id, delta);
         const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🎰 KOC Kill Ops City Slots")
+          .setTitle("ð° KOC Kill Ops City Slots")
           .setDescription(`\`[ ${a} | ${b} | ${c} ]\`\n\n${resultText}\n${delta >= 0 ? `Won **${fmtMoney(delta)}**` : `Lost **${fmtMoney(-delta)}**`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(jackpot ? 0xffd700 : win3 ? 0x57f287 : win2 ? 0x99aab5 : 0xed4245)] });
         break;
@@ -1786,7 +1792,7 @@ async function handleCommandMessage(message) {
       case "dice": {
         const acc = economy.get(message.guild.id, message.author.id);
         const bet = args[0] === "all" ? acc.balance : Math.floor(Number(args[0]));
-        if (!bet || bet < 1) return void message.reply("Usage: `!dice <amount|all>` — roll higher than the house to win");
+        if (!bet || bet < 1) return void message.reply("Usage: `!dice <amount|all>` â roll higher than the house to win");
         if (bet > acc.balance) return void message.reply(`You don't have that much. Balance: ${fmtMoney(acc.balance)}`);
         const you = Math.floor(Math.random() * 6) + 1;
         const house = Math.floor(Math.random() * 6) + 1;
@@ -1796,8 +1802,8 @@ async function handleCommandMessage(message) {
         economy.add(message.guild.id, message.author.id, delta);
         const updated = economy.get(message.guild.id, message.author.id);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("🎲 Dice Duel")
-          .setDescription(`You rolled **${you}**, house rolled **${house}**.\n${tie ? "🤝 Tie — bet refunded." : win ? `🎉 You won **${fmtMoney(bet)}**!` : `😢 You lost **${fmtMoney(bet)}**.`}\nBalance: ${fmtMoney(updated.balance)}`)
+          .setTitle("ð² Dice Duel")
+          .setDescription(`You rolled **${you}**, house rolled **${house}**.\n${tie ? "ð¤ Tie â bet refunded." : win ? `ð You won **${fmtMoney(bet)}**!` : `ð¢ You lost **${fmtMoney(bet)}**.`}\nBalance: ${fmtMoney(updated.balance)}`)
           .setColor(tie ? 0xffd700 : win ? 0x57f287 : 0xed4245)] });
         break;
       }
@@ -1805,10 +1811,10 @@ async function handleCommandMessage(message) {
       case "leaveall":
       case "leave-all": {
         if (message.author.id !== OWNER_ID) {
-          return void message.reply("🚫 This command is locked — only the owner can use it.");
+          return void message.reply("ð« This command is locked â only the owner can use it.");
         }
         if (message.guild.id !== PROTECTED_GUILD_ID) {
-          return void message.reply("🚫 This command can only be used in the KOC Kill Ops City server.");
+          return void message.reply("ð« This command can only be used in the KOC Kill Ops City server.");
         }
 
         const otherGuilds = [...client.guilds.cache.values()]
@@ -1819,17 +1825,17 @@ async function handleCommandMessage(message) {
           if (await leaveUnauthorizedGuild(guild, `!${cmd} command`)) leftCount++;
         }
 
-        await message.reply(`✅ Left **${leftCount}** server(s). I stayed in the KOC Kill Ops City server.`);
+        await message.reply(`â Left **${leftCount}** server(s). I stayed in the KOC Kill Ops City server.`);
         break;
       }
       case "givemoney": {
-        if (message.author.id !== OWNER_ID) return void message.reply("🚫 This command is locked — only the owner can use it.");
+        if (message.author.id !== OWNER_ID) return void message.reply("ð« This command is locked â only the owner can use it.");
         const user = targetUser || message.author;
         const amount = Math.floor(Number(args.find(a => /^-?\d+$/.test(a)) || 0));
         if (!amount) return void message.reply("Usage: `!givemoney [@user] <amount>`");
         const updated = economy.add(message.guild.id, user.id, amount);
         await message.reply({ embeds: [new EmbedBuilder()
-          .setTitle("💸 Chips Granted")
+          .setTitle("ð¸ Chips Granted")
           .setDescription(`Gave **${fmtMoney(amount)}** to ${user}.\nNew balance: ${fmtMoney(updated.balance)}`)
           .setColor(0xffd700)] });
         break;
@@ -1839,13 +1845,13 @@ async function handleCommandMessage(message) {
         if (!top.length) return void message.reply("Nobody has any chips yet.");
         const lines = await Promise.all(top.map(async (e, i) => {
           const u = await client.users.fetch(e.userId).catch(() => null);
-          return `**${i + 1}.** ${u ? u.username : "Unknown User"} — ${fmtMoney(e.balance)}`;
+          return `**${i + 1}.** ${u ? u.username : "Unknown User"} â ${fmtMoney(e.balance)}`;
         }));
-        await message.reply({ embeds: [new EmbedBuilder().setTitle("🏆 KOC Kill Ops City Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle("ð KOC Kill Ops City Casino Leaderboard").setDescription(`*Ranked by net worth (wallet + bank)*\n\n${lines.join("\n")}`).setColor(0xffd700)] });
         break;
       }
 
-      // ── Admin ─────────────────────────────────────────────────────────────
+      // ââ Admin âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "say": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         const parts = message.content.slice(PREFIX.length + "say".length).trim();
@@ -1868,8 +1874,8 @@ async function handleCommandMessage(message) {
         const [title, ...bodyParts] = rest.split("|").map(p=>p.trim());
         const body = bodyParts.join("|").trim();
         if (!title || !body) return void message.reply("Usage: `!announce #channel <title> | <message>`");
-        await targetCh.send({ embeds: [new EmbedBuilder().setTitle(`📢 ${title}`).setDescription(body).setColor(0xf5a623).setFooter({ text: `Announced by ${message.author.tag}` }).setTimestamp()] });
-        await message.reply(`✅ Announcement sent to ${targetCh}`);
+        await targetCh.send({ embeds: [new EmbedBuilder().setTitle(`ð¢ ${title}`).setDescription(body).setColor(0xf5a623).setFooter({ text: `Announced by ${message.author.tag}` }).setTimestamp()] });
+        await message.reply(`â Announcement sent to ${targetCh}`);
         break;
       }
       case "role": {
@@ -1886,7 +1892,7 @@ async function handleCommandMessage(message) {
 
         let userPart, rolePart;
         // If the user is @mentioned, cut that out first and treat literally everything
-        // else as the role name — this way a role name containing "|" (or anything
+        // else as the role name â this way a role name containing "|" (or anything
         // else) still works, instead of breaking on the "|" separator.
         const userMentionMatch = rest.match(/<@!?(\d+)>/);
         if (userMentionMatch) {
@@ -1895,7 +1901,7 @@ async function handleCommandMessage(message) {
         } else if (rest.includes("|")) {
           [userPart, rolePart] = rest.split("|").map(s => s.trim());
         } else {
-          // No mention and no "|" — mark the split point with a bare role ID instead.
+          // No mention and no "|" â mark the split point with a bare role ID instead.
           const roleAnchorMatch = rest.match(/\b\d{17,19}\b/);
           if (!roleAnchorMatch) return void message.reply(`I couldn't tell which member and role you meant.\n\n${usage}`);
           rolePart = roleAnchorMatch[0];
@@ -1913,10 +1919,10 @@ async function handleCommandMessage(message) {
         const hasRole = member.roles.cache.has(role.id);
         if (hasRole) {
           await member.roles.remove(role);
-          await message.reply({ content: `✅ Role updated — **${member.user.tag}** no longer has **${role.name}**.`, allowedMentions: { parse: [] } });
+          await message.reply({ content: `â Role updated â **${member.user.tag}** no longer has **${role.name}**.`, allowedMentions: { parse: [] } });
         } else {
           await member.roles.add(role);
-          await message.reply({ content: `✅ Role updated — **${member.user.tag}** now has **${role.name}**.`, allowedMentions: { parse: [] } });
+          await message.reply({ content: `â Role updated â **${member.user.tag}** now has **${role.name}**.`, allowedMentions: { parse: [] } });
         }
         break;
       }
@@ -1925,9 +1931,9 @@ async function handleCommandMessage(message) {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
         const msg = message.content.slice(PREFIX.length + "setwelcome".length).replace(/<#\d+>/, "").trim();
-        if (!ch) return void message.reply("Usage: `!setwelcome #channel <message>` — use {user}, {server}, {count}");
+        if (!ch) return void message.reply("Usage: `!setwelcome #channel <message>` â use {user}, {server}, {count}");
         setConfig(message.guild.id, { welcomeChannel: ch.id, welcomeMsg: msg || undefined });
-        await message.reply(`✅ Welcome messages will be sent to ${ch}${msg ? ` with custom message.` : ` with default message.`}`);
+        await message.reply(`â Welcome messages will be sent to ${ch}${msg ? ` with custom message.` : ` with default message.`}`);
         break;
       }
       case "testwelcome": {
@@ -1938,19 +1944,19 @@ async function handleCommandMessage(message) {
         const msg = cfg.welcomeMsg || `Welcome to **${message.guild.name}**, ${message.author}! You are member #${message.guild.memberCount}.`;
         const ch = await client.channels.fetch(chId);
         const previewAttachment = welcomeImageAttachment();
-        const previewEmbed = new EmbedBuilder().setTitle("👋 Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
+        const previewEmbed = new EmbedBuilder().setTitle("ð Welcome!").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0x57f287).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
         if (previewAttachment) previewEmbed.setImage("attachment://welcome.png");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
-        await message.reply("✅ Preview sent!");
+        await message.reply("â Preview sent!");
         break;
       }
       case "setleave": {
         if (!requirePerm(message, PermissionFlagsBits.ManageGuild)) return;
         const ch = message.mentions.channels.first();
         const msg = message.content.slice(PREFIX.length + "setleave".length).replace(/<#\d+>/, "").trim();
-        if (!ch) return void message.reply("Usage: `!setleave #channel <message>` — use {user}, {server}, {count}");
+        if (!ch) return void message.reply("Usage: `!setleave #channel <message>` â use {user}, {server}, {count}");
         setConfig(message.guild.id, { leaveChannel: ch.id, leaveMsg: msg || undefined });
-        await message.reply(`✅ Leave messages will be sent to ${ch}${msg ? ` with custom message.` : ` with default message.`}`);
+        await message.reply(`â Leave messages will be sent to ${ch}${msg ? ` with custom message.` : ` with default message.`}`);
         break;
       }
       case "testleave": {
@@ -1961,10 +1967,10 @@ async function handleCommandMessage(message) {
         const msg = cfg.leaveMsg || `**${message.author.username}** has left **${message.guild.name}**. We're down to ${message.guild.memberCount} members.`;
         const ch = await client.channels.fetch(chId);
         const previewAttachment = leaveImageAttachment();
-        const previewEmbed = new EmbedBuilder().setTitle("👋 Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
+        const previewEmbed = new EmbedBuilder().setTitle("ð Member Left").setDescription(msg.replace("{user}", `${message.author}`).replace("{server}", message.guild.name).replace("{count}", message.guild.memberCount)).setColor(0xed4245).setThumbnail(message.author.displayAvatarURL()).setFooter({ text: "This is a preview" });
         if (previewAttachment) previewEmbed.setImage("attachment://leave.png");
         await ch.send({ embeds: [previewEmbed], files: previewAttachment ? [previewAttachment] : [] });
-        await message.reply("✅ Preview sent!");
+        await message.reply("â Preview sent!");
         break;
       }
       case "setmodlog": {
@@ -1972,19 +1978,19 @@ async function handleCommandMessage(message) {
         const ch = message.mentions.channels.first();
         if (!ch) return void message.reply("Usage: `!setmodlog #channel`");
         setConfig(message.guild.id, { modlogChannel: ch.id });
-        await message.reply(`✅ Mod log set to ${ch}`);
+        await message.reply(`â Mod log set to ${ch}`);
         break;
       }
-      // ── Moderation ────────────────────────────────────────────────────────
+      // ââ Moderation ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "kick": {
         if (!requirePerm(message, PermissionFlagsBits.KickMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!kick @user [reason]`");
         if (rejectSelfModeration(message, targetUser)) return;
-        if (!targetMember.kickable) return void message.reply("I can't kick that member — they may have a role equal to or higher than mine, or I'm missing the **Kick Members** permission.");
+        if (!targetMember.kickable) return void message.reply("I can't kick that member â they may have a role equal to or higher than mine, or I'm missing the **Kick Members** permission.");
         const reason = args.slice(1).join(" ") || "No reason provided";
         await targetMember.kick(reason);
-        await message.reply(`👢 Kicked **${targetUser.tag}** — ${reason}`);
-        await logToModlog(message.guild, new EmbedBuilder().setTitle("👢 Member Kicked").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
+        await message.reply(`ð¢ Kicked **${targetUser.tag}** â ${reason}`);
+        await logToModlog(message.guild, new EmbedBuilder().setTitle("ð¢ Member Kicked").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
       case "ban": {
@@ -1997,15 +2003,15 @@ async function handleCommandMessage(message) {
           }
           const botHighestRole = message.guild.members.me?.roles.highest;
           if (botHighestRole && botHighestRole.comparePositionTo(targetMember.roles.highest) <= 0) {
-            return void message.reply("I can't ban this member because their highest role is equal to or above mine. Administrator permission does not bypass Discord role hierarchy—move my highest role above theirs.");
+            return void message.reply("I can't ban this member because their highest role is equal to or above mine. Administrator permission does not bypass Discord role hierarchyâmove my highest role above theirs.");
           }
           return void message.reply("I can't ban this member because I need the Ban Members permission.");
         }
         const reason = args.slice(1).join(" ") || "No reason provided";
         await message.guild.members.ban(targetUser.id, { reason });
         console.info("[command-action] !ban outcome=success");
-        await message.reply(`🔨 Banned **${targetUser.tag}** — ${reason}`);
-        await logToModlog(message.guild, new EmbedBuilder().setTitle("🔨 Member Banned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xed4245).setTimestamp());
+        await message.reply(`ð¨ Banned **${targetUser.tag}** â ${reason}`);
+        await logToModlog(message.guild, new EmbedBuilder().setTitle("ð¨ Member Banned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason }).setColor(0xed4245).setTimestamp());
         break;
       }
       case "unban": {
@@ -2013,31 +2019,31 @@ async function handleCommandMessage(message) {
         const userId = args[0];
         if (!userId) return void message.reply("Usage: `!unban <user-id>`");
         await message.guild.members.unban(userId);
-        await message.reply(`✅ Unbanned user with ID **${userId}**`);
+        await message.reply(`â Unbanned user with ID **${userId}**`);
         break;
       }
       case "timeout": case "to": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         const ms = parseTimeoutDuration(args[1]);
-        if (!targetMember || !ms) return void message.reply("Usage: `!to @user <duration> [reason]` — e.g. `!to @user 10`, `10m`, `10min`, `1h`, `1d` (a bare number means minutes)");
+        if (!targetMember || !ms) return void message.reply("Usage: `!to @user <duration> [reason]` â e.g. `!to @user 10`, `10m`, `10min`, `1h`, `1d` (a bare number means minutes)");
         if (rejectSelfModeration(message, targetUser)) return;
         const maxMs = 28 * 24 * 60 * 60 * 1000; // Discord's timeout cap
         if (ms > maxMs) return void message.reply("Timeout duration can't exceed 28 days.");
-        if (!targetMember.moderatable) return void message.reply("I can't timeout that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
+        if (!targetMember.moderatable) return void message.reply("I can't timeout that member â they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
         const mins = Math.round(ms / 60000);
         const reason = args.slice(2).join(" ") || "No reason provided";
         await targetMember.timeout(ms, reason);
-        await message.reply(`⏱️ Timed out **${targetUser.tag}** for **${mins}m** — ${reason}`);
-        await logToModlog(message.guild, new EmbedBuilder().setTitle("⏱️ Member Timed Out").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Duration", value: `${mins} min`, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
+        await message.reply(`â±ï¸ Timed out **${targetUser.tag}** for **${mins}m** â ${reason}`);
+        await logToModlog(message.guild, new EmbedBuilder().setTitle("â±ï¸ Member Timed Out").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Duration", value: `${mins} min`, inline: true },{ name: "Reason", value: reason }).setColor(0xffa500).setTimestamp());
         break;
       }
       case "untimeout": case "rto": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         if (!targetMember) return void message.reply("Usage: `!rto @user`");
         if (rejectSelfModeration(message, targetUser)) return;
-        if (!targetMember.moderatable) return void message.reply("I can't manage that member — they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
+        if (!targetMember.moderatable) return void message.reply("I can't manage that member â they may have a role equal to or higher than mine, or I'm missing the **Timeout Members** permission.");
         await targetMember.timeout(null);
-        await message.reply(`✅ Removed timeout from **${targetUser.tag}**`);
+        await message.reply(`â Removed timeout from **${targetUser.tag}**`);
         break;
       }
       case "warn": {
@@ -2046,9 +2052,9 @@ async function handleCommandMessage(message) {
         if (!targetUser || !reason) return void message.reply("Usage: `!warn @user <reason>`");
         warnings.add({ id: `${Date.now()}`, userId: targetUser.id, guildId: message.guild.id, moderatorId: message.author.id, reason, createdAt: new Date().toISOString() });
         const count = warnings.forUser(message.guild.id, targetUser.id).length;
-        await message.reply(`⚠️ Warned **${targetUser.tag}** — ${reason} (total: ${count})`);
+        await message.reply(`â ï¸ Warned **${targetUser.tag}** â ${reason} (total: ${count})`);
         await targetUser.send(`You were warned in **${message.guild.name}**: ${reason}`).catch(()=>{});
-        await logToModlog(message.guild, new EmbedBuilder().setTitle("⚠️ Member Warned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason },{ name: "Total Warnings", value: `${count}`, inline: true }).setColor(0xf5a623).setTimestamp());
+        await logToModlog(message.guild, new EmbedBuilder().setTitle("â ï¸ Member Warned").addFields({ name: "User", value: targetUser.tag, inline: true },{ name: "Moderator", value: message.author.tag, inline: true },{ name: "Reason", value: reason },{ name: "Total Warnings", value: `${count}`, inline: true }).setColor(0xf5a623).setTimestamp());
         break;
       }
       case "warnings": {
@@ -2056,25 +2062,25 @@ async function handleCommandMessage(message) {
         if (!targetUser) return void message.reply("Usage: `!warnings @user`");
         const list = warnings.forUser(message.guild.id, targetUser.id);
         if (!list.length) return void message.reply(`**${targetUser.tag}** has no warnings.`);
-        await message.reply({ embeds: [new EmbedBuilder().setTitle(`⚠️ Warnings for ${targetUser.tag}`).setColor(0xf5a623).setDescription(list.map((w,i)=>`**${i+1}.** ${w.reason}`).join("\n"))] });
+        await message.reply({ embeds: [new EmbedBuilder().setTitle(`â ï¸ Warnings for ${targetUser.tag}`).setColor(0xf5a623).setDescription(list.map((w,i)=>`**${i+1}.** ${w.reason}`).join("\n"))] });
         break;
       }
       case "clearwarnings": {
         if (!requirePerm(message, PermissionFlagsBits.ModerateMembers)) return;
         if (!targetUser) return void message.reply("Usage: `!clearwarnings @user`");
-        await message.reply(`🧼 Cleared ${warnings.clear(message.guild.id, targetUser.id)} warning(s) for **${targetUser.tag}**`);
+        await message.reply(`ð§¼ Cleared ${warnings.clear(message.guild.id, targetUser.id)} warning(s) for **${targetUser.tag}**`);
         break;
       }
       case "lock": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false });
-        await message.reply("🔒 Channel locked.");
+        await message.reply("ð Channel locked.");
         break;
       }
       case "unlock": {
         if (!requirePerm(message, PermissionFlagsBits.ManageChannels)) return;
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: null });
-        await message.reply("🔓 Channel unlocked.");
+        await message.reply("ð Channel unlocked.");
         break;
       }
       case "slowmode": {
@@ -2082,7 +2088,7 @@ async function handleCommandMessage(message) {
         const secs = Number(args[0]);
         if (isNaN(secs) || secs < 0 || secs > 21600) return void message.reply("Usage: `!slowmode <seconds>` (0 to disable, max 21600)");
         await message.channel.setRateLimitPerUser(secs);
-        await message.reply(secs === 0 ? "✅ Slowmode disabled." : `✅ Slowmode set to **${secs} second(s)**.`);
+        await message.reply(secs === 0 ? "â Slowmode disabled." : `â Slowmode set to **${secs} second(s)**.`);
         break;
       }
       case "clear": case "purge": {
@@ -2119,7 +2125,7 @@ async function handleCommandMessage(message) {
             return void message.reply("No messages were deleted. Check my Manage Messages permission and try again.");
           }
           console.info(`[command-action] !purge outcome=success count=${deletedCount}`);
-          const reply = await message.channel.send(`🗑️ Deleted **${deletedCount}** message(s).`);
+          const reply = await message.channel.send(`ðï¸ Deleted **${deletedCount}** message(s).`);
           setTimeout(() => reply.delete().catch(()=>{}), 3000);
         } catch (err) {
           const errorCode = err?.code ?? err?.rawError?.code ?? "unknown";
@@ -2127,34 +2133,34 @@ async function handleCommandMessage(message) {
           const reason = Number(errorCode) === 50013
             ? "Discord denied the delete. Check my Manage Messages permission in this channel."
             : "Purge failed; Discord did not confirm any deletions. Check my channel permissions and try again.";
-          await message.reply(`❌ ${reason}`);
+          await message.reply(`â ${reason}`);
         }
         break;
       }
 
-      // ── Giveaway ─────────────────────────────────────────────────────────
+      // ââ Giveaway âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "gw": case "giveaway": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         const [durStr, winStr, ...prizeArr] = args;
         const prize = prizeArr.join(" ");
         const ms = parseDuration(durStr || "");
         const winCount = Number(winStr);
-        if (!ms || !Number.isInteger(winCount) || winCount < 1 || !prize) return void message.reply("Usage: `!giveaway <duration> <winners> <prize>` — e.g. `!giveaway 10m 1 Nitro`");
+        if (!ms || !Number.isInteger(winCount) || winCount < 1 || !prize) return void message.reply("Usage: `!giveaway <duration> <winners> <prize>` â e.g. `!giveaway 10m 1 Nitro`");
         const endsAt = new Date(Date.now() + ms).toISOString();
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("🎉 Enter Giveaway").setStyle(ButtonStyle.Primary));
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(GIVEAWAY_BTN).setLabel("ð Enter Giveaway").setStyle(ButtonStyle.Primary));
         const embed = new EmbedBuilder()
-          .setTitle("🎁 Giveaway!")
+          .setTitle("ð Giveaway!")
           .setDescription(`**Prize:** ${prize}\n**Winners:** ${winCount}\n**Ends:** <t:${Math.floor((Date.now()+ms)/1000)}:R>`)
           .setColor(0xffd700)
           .setFooter({ text: `Hosted by ${message.author.tag}` })
           .setTimestamp(Date.now() + ms)
-          .setFields({ name: "🎟️ Entries — 0", value: "Nobody yet — be the first!", inline: false });
+          .setFields({ name: "ðï¸ Entries â 0", value: "Nobody yet â be the first!", inline: false });
         const giveawayAttachment = giveawayImageAttachment();
         // Attach the banner once; referencing the same file as an embed image makes Discord render it twice.
         const gMsg = await message.channel.send({ embeds: [embed], components: [row], files: giveawayAttachment ? [giveawayAttachment] : [] });
         giveaways.add({ messageId: gMsg.id, channelId: message.channel.id, guildId: message.guild.id, prize, winnerCount: winCount, endsAt, participants: [], ended: false });
         scheduleGiveaway(client, gMsg.id, ms);
-        await message.reply("✅ Giveaway started!");
+        await message.reply("â Giveaway started!");
         break;
       }
       case "glist": case "giveawaylist": {
@@ -2174,7 +2180,7 @@ async function handleCommandMessage(message) {
         const g = giveaways.get(messageId);
         if (!g) return void message.reply("Couldn't find a giveaway with that message ID.");
         if (!g.participants.length) {
-          return void message.reply({ embeds: [new EmbedBuilder().setTitle(`🎁 Giveaway Participants — ${g.prize}`).setDescription("Nobody has entered yet.").setColor(0xfee75c)] });
+          return void message.reply({ embeds: [new EmbedBuilder().setTitle(`ð Giveaway Participants â ${g.prize}`).setDescription("Nobody has entered yet.").setColor(0xfee75c)] });
         }
         // Resolve IDs to usernames in batches
         const names = await Promise.all(
@@ -2192,10 +2198,10 @@ async function handleCommandMessage(message) {
         for (let i = 0; i < names.length; i += 30) chunks.push(names.slice(i, i + 30));
         for (let p = 0; p < chunks.length; p++) {
           const embed = new EmbedBuilder()
-            .setTitle(`🎁 ${g.prize} — Participants (${g.participants.length}) [${status}]`)
+            .setTitle(`ð ${g.prize} â Participants (${g.participants.length}) [${status}]`)
             .setDescription(chunks[p].join("\n"))
             .setColor(0xfee75c)
-            .setFooter({ text: `Page ${p + 1}/${chunks.length} • Message ID: ${messageId}` });
+            .setFooter({ text: `Page ${p + 1}/${chunks.length} â¢ Message ID: ${messageId}` });
           await message.channel.send({ embeds: [embed] });
         }
         break;
@@ -2204,7 +2210,7 @@ async function handleCommandMessage(message) {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         let messageId = args[0];
         if (!messageId) {
-          // No ID given — end the most recent active giveaway in this channel.
+          // No ID given â end the most recent active giveaway in this channel.
           const active = giveaways.all().filter(g => g.channelId === message.channel.id && !g.ended);
           if (!active.length) return void message.reply("No active giveaway in this channel. Usage: `!gend <messageId>`");
           messageId = active[active.length - 1].messageId;
@@ -2213,14 +2219,14 @@ async function handleCommandMessage(message) {
         if (!g) return void message.reply("Couldn't find a giveaway with that message ID.");
         if (g.ended) return void message.reply("That giveaway has already ended.");
         await endGiveaway(client, messageId);
-        await message.reply("✅ Giveaway ended early.");
+        await message.reply("â Giveaway ended early.");
         break;
       }
 
-      // ── Help ─────────────────────────────────────────────────────────────
+      // ââ Help âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "help": {
         const helpLines = [
-          "**📖 " + KOC_BRAND + " Commands**",
+          "**ð " + KOC_BRAND + " Commands**",
           "",
           "**General**  `!ping` `!botinfo` `!uptime` `!userinfo` `!serverinfo` `!avatar` `!membercount`",
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
@@ -2253,12 +2259,12 @@ async function handleCommandMessage(message) {
     const reason = Number(errorCode) === 50013
       ? "Discord denied the action. Check the bot's channel permissions and role hierarchy."
       : `The command failed (error code ${errorCode}).`;
-    await message.reply(`❌ !${cmd} failed. ${reason}`).catch(()=>{});
+    await message.reply(`â !${cmd} failed. ${reason}`).catch(()=>{});
   }
 }
 client.on("messageCreate", handleCommandMessage);
 
-// ─── Dashboard HTTP API ─────────────────────────────────────────────────────
+// âââ Dashboard HTTP API âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const dashApp = express();
 dashApp.use(cors());
 dashApp.use(express.json({ limit: "10mb" }));
@@ -2322,7 +2328,7 @@ dashApp.post("/dashboard/image", authCheck, (req, res) => {
 });
 
 const DASH_PORT = parseInt(process.env.PORT || process.env.DASHBOARD_PORT || "3001", 10);
-dashApp.listen(DASH_PORT, () => console.log(`📊 Dashboard API listening on port ${DASH_PORT}`));
+dashApp.listen(DASH_PORT, () => console.log(`ð Dashboard API listening on port ${DASH_PORT}`));
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) { console.error("ERROR: DISCORD_TOKEN environment variable is not set."); process.exit(1); }
