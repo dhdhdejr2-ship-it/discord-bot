@@ -112,6 +112,37 @@ const GIVEAWAY_BTN   = "giveaway_enter";
 const VERIFY_BTN     = "verify_click";
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
 
+const DEFAULT_GIF_LINK_DOMAINS = ["tenor.com", "giphy.com"];
+
+function extractMessageLinks(content) {
+  return content.match(/(?:https?:\/\/|www\.)[^\s<>()]+|(?:discord\.gg|discord\.com\/invite)\/[^\s<>()]+/gi) || [];
+}
+
+function parseAntiLinkUrl(rawLink) {
+  const candidate = /^https?:\/\//i.test(rawLink) ? rawLink : "https://" + rawLink;
+  try { return new URL(candidate); } catch { return null; }
+}
+
+function normalizeAntiLinkDomain(input) {
+  if (!input || typeof input !== "string") return null;
+  const parsed = parseAntiLinkUrl(input.trim());
+  if (!parsed) return null;
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  if (!host.includes(".") || host.length > 253 || !/^[a-z0-9.-]+$/.test(host) || host.includes("..")) return null;
+  if (host.split(".").some(label => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) return null;
+  return host;
+}
+
+function isAntiLinkUrlAllowed(rawLink, cfg) {
+  const parsed = parseAntiLinkUrl(rawLink);
+  if (!parsed) return false;
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  const customDomains = Array.isArray(cfg.antiLinkWhitelistDomains) ? cfg.antiLinkWhitelistDomains : [];
+  const domains = DEFAULT_GIF_LINK_DOMAINS.concat(customDomains);
+  if (domains.some(domain => typeof domain === "string" && (host === domain.toLowerCase() || host.endsWith("." + domain.toLowerCase())))) return true;
+  return (host === "cdn.discordapp.com" || host === "media.discordapp.net") && /\.gif$/i.test(parsed.pathname);
+}
+
 const NUMBER_EMOJI = ["1ï¸â£","2ï¸â£","3ï¸â£","4ï¸â£","5ï¸â£"];
 
 const startTime = Date.now();
@@ -900,17 +931,24 @@ client.on("messageCreate", async message => {
   }
 });
 
-// âââ Anti-link protection ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Anti-link protection ──────────────────────────────────────────────────
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild || !LINK_PATTERN.test(message.content)) return;
+  const links = extractMessageLinks(message.content);
+  if (!links.length) return;
   const cfg = getConfig(message.guild.id);
   if (!cfg.antiLink) return;
   if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
   if (cfg.antiLinkRole && message.member?.roles.cache.has(cfg.antiLinkRole)) return;
+  const whitelistUsers = Array.isArray(cfg.antiLinkWhitelistUsers) ? cfg.antiLinkWhitelistUsers : [];
+  const whitelistRoles = Array.isArray(cfg.antiLinkWhitelistRoles) ? cfg.antiLinkWhitelistRoles : [];
+  if (whitelistUsers.includes(message.author.id)) return;
+  if (message.member?.roles.cache.some(role => whitelistRoles.includes(role.id))) return;
+  if (links.every(link => isAntiLinkUrlAllowed(link, cfg))) return;
 
   await message.delete().catch(() => {});
   const notice = await message.channel.send({
-    content: `ð« ${message.author}, links are not allowed in this channel.`,
+    content: "🚫 " + message.author + ", links are not allowed in this channel.",
     allowedMentions: { users: [message.author.id] },
   }).catch(() => null);
   if (notice) setTimeout(() => notice.delete().catch(() => {}), 5000);
@@ -1183,6 +1221,96 @@ async function handleCommandMessage(message) {
         }
         const cleared = requirementsTracker.resetGuild(message.guild.id);
         return void message.reply("â Weekly requirements reset for this server. Cleared " + cleared + " recorded item(s).");
+      }
+
+      case "antilink": {
+        if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
+        const action = (args[0] || "status").toLowerCase();
+        const cfg = getConfig(message.guild.id);
+        const usage = "Usage: !antilink on|off|status | !antilink whitelist add|remove <domain|@user|@role> | !antilink whitelist list";
+
+        if (action === "on" || action === "enable") {
+          setConfig(message.guild.id, { antiLink: true });
+          await message.reply("✅ Anti-link protection enabled. Tenor and Giphy links, plus direct Discord .gif links, remain allowed.");
+          break;
+        }
+        if (action === "off" || action === "disable") {
+          setConfig(message.guild.id, { antiLink: false });
+          await message.reply("✅ Anti-link protection disabled.");
+          break;
+        }
+        if (action === "status") {
+          await message.reply("🛡️ Anti-link protection is " + (cfg.antiLink ? "enabled" : "disabled") + ". GIF links from tenor.com and giphy.com are allowed by default. Use !antilink whitelist list to view exceptions.");
+          break;
+        }
+        if (action !== "whitelist") {
+          await message.reply(usage);
+          break;
+        }
+
+        const whitelistAction = (args[1] || "list").toLowerCase();
+        const domains = Array.isArray(cfg.antiLinkWhitelistDomains) ? cfg.antiLinkWhitelistDomains : [];
+        const users = Array.isArray(cfg.antiLinkWhitelistUsers) ? cfg.antiLinkWhitelistUsers : [];
+        const roles = Array.isArray(cfg.antiLinkWhitelistRoles) ? cfg.antiLinkWhitelistRoles : [];
+        if (whitelistAction === "list") {
+          const formatList = items => items.length ? items.slice(0, 20).join(", ") + (items.length > 20 ? " … and " + (items.length - 20) + " more" : "") : "None";
+          const userMentions = users.map(id => "<@" + id + ">");
+          const roleMentions = roles.map(id => "<@&" + id + ">");
+          const response = [
+            "GIF domains allowed by default: " + DEFAULT_GIF_LINK_DOMAINS.join(", ") + "; direct Discord .gif links are also allowed.",
+            "Additional allowed domains: " + formatList(domains),
+            "Whitelisted users (may post any link): " + formatList(userMentions),
+            "Whitelisted roles (members may post any link): " + formatList(roleMentions),
+          ].join("\n");
+          await message.reply({ content: response, allowedMentions: { parse: [] } });
+          break;
+        }
+        if (whitelistAction !== "add" && whitelistAction !== "remove") {
+          await message.reply(usage);
+          break;
+        }
+
+        const role = message.mentions.roles.first();
+        const user = message.mentions.users.first();
+        let listKey;
+        let item;
+        let label;
+        if (role) {
+          listKey = "antiLinkWhitelistRoles";
+          item = role.id;
+          label = "role " + role.name;
+        } else if (user) {
+          listKey = "antiLinkWhitelistUsers";
+          item = user.id;
+          label = "user " + user.tag;
+        } else {
+          const domain = normalizeAntiLinkDomain(args.slice(2).join(" ").trim());
+          if (!domain) {
+            await message.reply(usage + "\nFor a domain, use a hostname such as tenor.com.");
+            break;
+          }
+          listKey = "antiLinkWhitelistDomains";
+          item = domain;
+          label = "domain " + domain;
+        }
+
+        const currentList = listKey === "antiLinkWhitelistRoles" ? roles : listKey === "antiLinkWhitelistUsers" ? users : domains;
+        if (whitelistAction === "add") {
+          if (currentList.includes(item)) {
+            await message.reply("That " + label + " is already on the anti-link whitelist.");
+            break;
+          }
+          setConfig(message.guild.id, { [listKey]: currentList.concat(item) });
+          await message.reply("✅ Added " + label + " to the anti-link whitelist. Whitelisted users and roles can post any link; whitelisted domains are allowed for everyone.");
+          break;
+        }
+        if (!currentList.includes(item)) {
+          await message.reply("That " + label + " is not on the anti-link whitelist.");
+          break;
+        }
+        setConfig(message.guild.id, { [listKey]: currentList.filter(value => value !== item) });
+        await message.reply("✅ Removed " + label + " from the anti-link whitelist.");
+        break;
       }
 
       case "setrank": {
@@ -2306,7 +2434,7 @@ async function handleCommandMessage(message) {
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
           "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
-          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
+          "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
         ];
