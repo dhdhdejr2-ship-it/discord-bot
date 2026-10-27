@@ -35,6 +35,24 @@ function setConfig(guildId, changes) {
   saveJSON("config.json", cfg);
 }
 
+const NICKNAME_RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EAI_AGAIN", "EPIPE", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"]);
+
+async function setNicknameWithRetries(member, nickname, reason, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await member.setNickname(nickname, reason);
+      return true;
+    } catch (error) {
+      const status = Number(error?.status || error?.statusCode || error?.httpStatus || 0);
+      const code = String(error?.code || error?.cause?.code || "");
+      const retryable = status === 429 || [500, 502, 503, 504].includes(status) || NICKNAME_RETRYABLE_NETWORK_CODES.has(code);
+      if (!retryable || attempt === maxAttempts) return false;
+      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    }
+  }
+  return false;
+}
+
 
 const warnings = {
   add(w) { const d = loadJSON("warnings.json"); d.push(w); saveJSON("warnings.json", d); },
@@ -849,7 +867,8 @@ client.on("guildMemberAdd", async member => {
         let botMember = member.guild.members.me;
         if (!botMember) botMember = await member.guild.members.fetchMe().catch(() => null);
         if (botMember?.permissions.has(PermissionFlagsBits.ManageNicknames) && member.manageable) {
-          await member.setNickname(nextNickname, "Automatic nickname prefix configured by a server administrator");
+          const updated = await setNicknameWithRetries(member, nextNickname, "Automatic nickname prefix configured by a server administrator");
+          if (!updated) console.warn("[autonickname] Failed to set a new member's server nickname after retries.");
         } else {
           console.warn("[autonickname] Could not set the new member's server nickname; check Manage Nicknames permission and role hierarchy.");
         }
@@ -2127,12 +2146,9 @@ async function handleCommandMessage(message) {
               skipped++;
               continue;
             }
-            try {
-              await member.setNickname(nextNickname, "Automatic nickname prefix configured by bot owner " + message.author.id);
-              renamed++;
-            } catch {
-              failed++;
-            }
+            const updated = await setNicknameWithRetries(member, nextNickname, "Automatic nickname prefix configured by bot owner " + message.author.id);
+            if (updated) renamed++;
+            else failed++;
           }
           return void message.reply({
             content: "Auto nickname enabled with " + pending.prefix + " | . Updated " + renamed + " existing member(s); skipped: " + skipped + "; failed: " + failed + ". New members will get the prefix automatically. Discord usernames are unchanged.",
@@ -2242,12 +2258,9 @@ async function handleCommandMessage(message) {
               skipped++;
               continue;
             }
-            try {
-              await member.setNickname(nextNickname, "Bulk nickname prefix by " + message.author.tag + " (" + message.author.id + ")");
-              renamed++;
-            } catch {
-              failed++;
-            }
+            const updated = await setNicknameWithRetries(member, nextNickname, "Bulk nickname prefix by " + message.author.tag + " (" + message.author.id + ")");
+            if (updated) renamed++;
+            else failed++;
           }
           return void message.reply({
             content: "Nickname prefix finished. Renamed: " + renamed + "; skipped: " + skipped + "; failed: " + failed + ".",
