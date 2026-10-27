@@ -2233,7 +2233,7 @@ async function handleCommandMessage(message) {
             pendingBulkNicknameChanges.delete(pendingKey);
             return void message.reply("That confirmation expired. Start again with !nickname <prefix>.");
           }
-          if (!suppliedCode || suppliedCode !== pending.code) {
+          if (suppliedCode && suppliedCode !== pending.code) {
             return void message.reply("Confirmation code didn't match. Use the code from your pending nickname change.");
           }
           pendingBulkNicknameChanges.delete(pendingKey);
