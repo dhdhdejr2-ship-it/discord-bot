@@ -104,6 +104,7 @@ const economy = {
 function fmtMoney(n) { return `ð° ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
+const pendingBulkNicknameChanges = new Map();
 const RANKERS_ROLE_ID = "1557558508428337185";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const KOC_BRAND = "KOC Kill Ops City";
@@ -2053,6 +2054,99 @@ async function handleCommandMessage(message) {
       }
 
       // ââ Admin âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+      case "nickname": {
+        if (!requirePerm(message, PermissionFlagsBits.Administrator)) return;
+
+        const subcommand = (args[0] || "").toLowerCase();
+        const pendingKey = message.guild.id + ":" + message.author.id;
+
+        if (subcommand === "all") {
+          const nickname = args.slice(1).join(" ").trim();
+          if (!nickname || nickname.length > 32) {
+            return void message.reply("Usage: !nickname all <name> (nicknames must be 1–32 characters).");
+          }
+
+          let botMember = message.guild.members.me;
+          if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
+          if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+            return void message.reply("I need the Manage Nicknames permission to do that.");
+          }
+
+          const members = await message.guild.members.fetch().catch(() => null);
+          if (!members) {
+            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          }
+          const targets = members.filter(member =>
+            !member.user.bot &&
+            member.id !== message.guild.ownerId &&
+            member.manageable &&
+            member.nickname !== nickname
+          );
+          if (!targets.size) {
+            return void message.reply("No eligible members need a nickname change. Bots, the server owner, and members above my role can't be changed.");
+          }
+
+          const code = Math.random().toString(36).slice(2, 8).toUpperCase().padEnd(6, "0");
+          pendingBulkNicknameChanges.set(pendingKey, {
+            nickname,
+            code,
+            expiresAt: Date.now() + 60_000,
+          });
+          return void message.reply({
+            content: "This will set " + targets.size + " manageable member(s)' server nicknames to " + nickname + ". Bots, the server owner, and members above my role are excluded. To proceed, type !nickname confirm " + code + " within 60 seconds.",
+            allowedMentions: { parse: [] },
+          });
+        }
+
+        if (subcommand === "confirm") {
+          const pending = pendingBulkNicknameChanges.get(pendingKey);
+          const suppliedCode = (args[1] || "").toUpperCase();
+          if (!pending) {
+            return void message.reply("There is no pending bulk nickname change for you. Start with !nickname all <name>.");
+          }
+          if (Date.now() > pending.expiresAt) {
+            pendingBulkNicknameChanges.delete(pendingKey);
+            return void message.reply("That confirmation expired. Start again with !nickname all <name>.");
+          }
+          if (!suppliedCode || suppliedCode !== pending.code) {
+            return void message.reply("Confirmation code didn't match. Use the code from your pending nickname change.");
+          }
+          pendingBulkNicknameChanges.delete(pendingKey);
+
+          let botMember = message.guild.members.me;
+          if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
+          if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+            return void message.reply("I need the Manage Nicknames permission to do that.");
+          }
+          const members = await message.guild.members.fetch().catch(() => null);
+          if (!members) {
+            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          }
+
+          let renamed = 0;
+          let skipped = 0;
+          let failed = 0;
+          for (const member of members.values()) {
+            if (member.user.bot || member.id === message.guild.ownerId || member.nickname === pending.nickname || !member.manageable) {
+              skipped++;
+              continue;
+            }
+            try {
+              await member.setNickname(pending.nickname, "Bulk nickname change by " + message.author.tag + " (" + message.author.id + ")");
+              renamed++;
+            } catch {
+              failed++;
+            }
+          }
+          return void message.reply({
+            content: "Bulk nickname change finished. Renamed: " + renamed + "; skipped: " + skipped + "; failed: " + failed + ".",
+            allowedMentions: { parse: [] },
+          });
+        }
+
+        return void message.reply("Usage: !nickname all <name>, then !nickname confirm <code>.");
+      }
+
       case "say": {
         if (!requirePerm(message, PermissionFlagsBits.ManageMessages)) return;
         const parts = message.content.slice(PREFIX.length + "say".length).trim();
@@ -2433,7 +2527,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Admin**  `!nickname all <name>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
