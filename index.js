@@ -105,6 +105,7 @@ function fmtMoney(n) { return `ð° ${n.toLocaleString()} chips`; }
 
 const PREFIX = "!";
 const pendingBulkNicknameChanges = new Map();
+const pendingAutoNicknameChanges = new Map();
 const RANKERS_ROLE_ID = "1557558508428337185";
 const OWNER_ID = "1449567336012054575"; // only this user can use owner-only commands
 const KOC_BRAND = "KOC Kill Ops City";
@@ -2076,9 +2077,68 @@ async function handleCommandMessage(message) {
 
       // ââ Admin âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       case "autonickname": {
-        if (!requirePerm(message, PermissionFlagsBits.Administrator)) return;
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("Only the configured bot owner can change automatic nickname settings.");
+        }
 
         const guildId = message.guild.id;
+        const pendingKey = guildId + ":" + message.author.id;
+        const buildAutoNickname = (member, prefix) => {
+          const currentName = String(member.nickname || member.user.globalName || member.user.username || "Member").trim();
+          const marker = prefix + " | ";
+          if (currentName.startsWith(marker)) return currentName.slice(0, 32);
+          const availableNameLength = Math.max(1, 32 - marker.length);
+          return marker + currentName.slice(0, availableNameLength);
+        };
+
+        if ((args[0] || "").toLowerCase() === "confirm") {
+          const pending = pendingAutoNicknameChanges.get(pendingKey);
+          const suppliedCode = (args[1] || "").toUpperCase();
+          if (!pending) {
+            return void message.reply("There is no pending auto nickname change. Start with !autonickname <prefix>.");
+          }
+          if (Date.now() > pending.expiresAt) {
+            pendingAutoNicknameChanges.delete(pendingKey);
+            return void message.reply("That confirmation expired. Start again with !autonickname <prefix>.");
+          }
+          if (!suppliedCode || suppliedCode !== pending.code) {
+            return void message.reply("Confirmation code didn't match. Use the code from your pending auto nickname change.");
+          }
+
+          let botMember = message.guild.members.me;
+          if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
+          if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+            return void message.reply("I need the Manage Nicknames permission to apply automatic nicknames.");
+          }
+          const members = await message.guild.members.fetch().catch(() => null);
+          if (!members) {
+            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          }
+
+          pendingAutoNicknameChanges.delete(pendingKey);
+          setConfig(guildId, { autoNicknamePrefix: pending.prefix });
+          let renamed = 0;
+          let skipped = 0;
+          let failed = 0;
+          for (const member of members.values()) {
+            const nextNickname = buildAutoNickname(member, pending.prefix);
+            if (member.user.bot || member.id === message.guild.ownerId || !member.manageable || nextNickname === member.displayName) {
+              skipped++;
+              continue;
+            }
+            try {
+              await member.setNickname(nextNickname, "Automatic nickname prefix configured by bot owner " + message.author.id);
+              renamed++;
+            } catch {
+              failed++;
+            }
+          }
+          return void message.reply({
+            content: "Auto nickname enabled with " + pending.prefix + " | . Updated " + renamed + " existing member(s); skipped: " + skipped + "; failed: " + failed + ". New members will get the prefix automatically. Discord usernames are unchanged.",
+            allowedMentions: { parse: [] },
+          });
+        }
+
         if (!args.length) {
           const currentPrefix = getConfig(guildId).autoNicknamePrefix;
           return void message.reply(currentPrefix
@@ -2091,6 +2151,7 @@ async function handleCommandMessage(message) {
           return void message.reply("Usage: !autonickname <prefix> or !autonickname off. Example: !autonickname 926 |");
         }
         if (prefix.toLowerCase() === "off" || prefix.toLowerCase() === "disable") {
+          pendingAutoNicknameChanges.delete(pendingKey);
           setConfig(guildId, { autoNicknamePrefix: "" });
           return void message.reply("Auto nickname disabled. New members' server nicknames will no longer be changed automatically.");
         }
@@ -2103,9 +2164,26 @@ async function handleCommandMessage(message) {
         if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
           return void message.reply("I need the Manage Nicknames permission to apply automatic nicknames.");
         }
-
-        setConfig(guildId, { autoNicknamePrefix: prefix });
-        return void message.reply("Auto nickname enabled for new members: " + prefix + " | <their current name>. This changes server nicknames only, not Discord usernames. Use !autonickname off to disable it.");
+        const members = await message.guild.members.fetch().catch(() => null);
+        if (!members) {
+          return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+        }
+        const eligibleCount = members.filter(member =>
+          !member.user.bot &&
+          member.id !== message.guild.ownerId &&
+          member.manageable &&
+          buildAutoNickname(member, prefix) !== member.displayName
+        ).size;
+        const code = Math.random().toString(36).slice(2, 8).toUpperCase().padEnd(6, "0");
+        pendingAutoNicknameChanges.set(pendingKey, {
+          prefix,
+          code,
+          expiresAt: Date.now() + 60_000,
+        });
+        return void message.reply({
+          content: "This will enable " + prefix + " | for future members and update " + eligibleCount + " eligible existing member(s). To proceed, type !autonickname confirm " + code + " within 60 seconds. This changes server nicknames only, not Discord usernames.",
+          allowedMentions: { parse: [] },
+        });
       }
 
       case "nickname": {
