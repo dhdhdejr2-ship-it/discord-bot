@@ -836,6 +836,27 @@ client.on("guildCreate", guild => {
 // âââ Welcome âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 client.on("guildMemberAdd", async member => {
   const cfg = getConfig(member.guild.id);
+  const autoPrefix = String(cfg.autoNicknamePrefix || "").trim();
+  if (autoPrefix && !member.user.bot) {
+    const marker = autoPrefix + " | ";
+    const currentName = String(member.nickname || member.user.globalName || member.user.username || "Member").trim();
+    const nextNickname = currentName.startsWith(marker)
+      ? currentName.slice(0, 32)
+      : marker + currentName.slice(0, Math.max(1, 32 - marker.length));
+    if (nextNickname !== member.displayName) {
+      try {
+        let botMember = member.guild.members.me;
+        if (!botMember) botMember = await member.guild.members.fetchMe().catch(() => null);
+        if (botMember?.permissions.has(PermissionFlagsBits.ManageNicknames) && member.manageable) {
+          await member.setNickname(nextNickname, "Automatic nickname prefix configured by a server administrator");
+        } else {
+          console.warn("[autonickname] Could not set the new member's server nickname; check Manage Nicknames permission and role hierarchy.");
+        }
+      } catch {
+        console.warn("[autonickname] Failed to set a new member's server nickname.");
+      }
+    }
+  }
   const chId = cfg.welcomeChannel || process.env.WELCOME_CHANNEL_ID;
   if (!chId) return;
   const msg = cfg.welcomeMsg || `Welcome to **${member.guild.name}**, ${member}! You are member #${member.guild.memberCount}.`;
@@ -2054,6 +2075,39 @@ async function handleCommandMessage(message) {
       }
 
       // ââ Admin âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+      case "autonickname": {
+        if (!requirePerm(message, PermissionFlagsBits.Administrator)) return;
+
+        const guildId = message.guild.id;
+        if (!args.length) {
+          const currentPrefix = getConfig(guildId).autoNicknamePrefix;
+          return void message.reply(currentPrefix
+            ? "Auto nickname is enabled for new members with prefix: " + currentPrefix + " | . Use !autonickname off to disable it."
+            : "Auto nickname is currently off. Use !autonickname <prefix> to set one, or !autonickname off to disable it.");
+        }
+
+        let prefix = args.join(" ").trim().replace(/\s*\|\s*$/, "").trim();
+        if (!prefix) {
+          return void message.reply("Usage: !autonickname <prefix> or !autonickname off. Example: !autonickname 926 |");
+        }
+        if (prefix.toLowerCase() === "off" || prefix.toLowerCase() === "disable") {
+          setConfig(guildId, { autoNicknamePrefix: "" });
+          return void message.reply("Auto nickname disabled. New members' server nicknames will no longer be changed automatically.");
+        }
+        if (prefix.length + 3 > 31) {
+          return void message.reply("That prefix is too long. It must leave room for at least one character of the member's name.");
+        }
+
+        let botMember = message.guild.members.me;
+        if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
+        if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+          return void message.reply("I need the Manage Nicknames permission to apply automatic nicknames.");
+        }
+
+        setConfig(guildId, { autoNicknamePrefix: prefix });
+        return void message.reply("Auto nickname enabled for new members: " + prefix + " | <their current name>. This changes server nicknames only, not Discord usernames. Use !autonickname off to disable it.");
+      }
+
       case "nickname": {
         if (!requirePerm(message, PermissionFlagsBits.Administrator)) return;
 
@@ -2532,7 +2586,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!autonickname <prefix|off>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
