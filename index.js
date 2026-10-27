@@ -2059,54 +2059,23 @@ async function handleCommandMessage(message) {
 
         const subcommand = (args[0] || "").toLowerCase();
         const pendingKey = message.guild.id + ":" + message.author.id;
-
-        if (subcommand === "all") {
-          const nickname = args.slice(1).join(" ").trim();
-          if (!nickname || nickname.length > 32) {
-            return void message.reply("Usage: !nickname all <name> (nicknames must be 1–32 characters).");
-          }
-
-          let botMember = message.guild.members.me;
-          if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
-          if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
-            return void message.reply("I need the Manage Nicknames permission to do that.");
-          }
-
-          const members = await message.guild.members.fetch().catch(() => null);
-          if (!members) {
-            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
-          }
-          const targets = members.filter(member =>
-            !member.user.bot &&
-            member.id !== message.guild.ownerId &&
-            member.manageable &&
-            member.nickname !== nickname
-          );
-          if (!targets.size) {
-            return void message.reply("No eligible members need a nickname change. Bots, the server owner, and members above my role can't be changed.");
-          }
-
-          const code = Math.random().toString(36).slice(2, 8).toUpperCase().padEnd(6, "0");
-          pendingBulkNicknameChanges.set(pendingKey, {
-            nickname,
-            code,
-            expiresAt: Date.now() + 60_000,
-          });
-          return void message.reply({
-            content: "This will set " + targets.size + " manageable member(s)' server nicknames to " + nickname + ". Bots, the server owner, and members above my role are excluded. To proceed, type !nickname confirm " + code + " within 60 seconds.",
-            allowedMentions: { parse: [] },
-          });
-        }
+        const buildPrefixedNickname = (member, prefix) => {
+          const currentName = String(member.nickname || member.user.globalName || member.user.username || "Member").trim();
+          const marker = prefix + " | ";
+          if (currentName.startsWith(marker)) return currentName.slice(0, 32);
+          const availableNameLength = Math.max(1, 32 - marker.length);
+          return marker + currentName.slice(0, availableNameLength);
+        };
 
         if (subcommand === "confirm") {
           const pending = pendingBulkNicknameChanges.get(pendingKey);
           const suppliedCode = (args[1] || "").toUpperCase();
           if (!pending) {
-            return void message.reply("There is no pending bulk nickname change for you. Start with !nickname all <name>.");
+            return void message.reply("There is no pending bulk nickname change for you. Start with !nickname <prefix>.");
           }
           if (Date.now() > pending.expiresAt) {
             pendingBulkNicknameChanges.delete(pendingKey);
-            return void message.reply("That confirmation expired. Start again with !nickname all <name>.");
+            return void message.reply("That confirmation expired. Start again with !nickname <prefix>.");
           }
           if (!suppliedCode || suppliedCode !== pending.code) {
             return void message.reply("Confirmation code didn't match. Use the code from your pending nickname change.");
@@ -2127,24 +2096,60 @@ async function handleCommandMessage(message) {
           let skipped = 0;
           let failed = 0;
           for (const member of members.values()) {
-            if (member.user.bot || member.id === message.guild.ownerId || member.nickname === pending.nickname || !member.manageable) {
+            const nextNickname = buildPrefixedNickname(member, pending.prefix);
+            if (member.user.bot || member.id === message.guild.ownerId || !member.manageable || nextNickname === member.displayName) {
               skipped++;
               continue;
             }
             try {
-              await member.setNickname(pending.nickname, "Bulk nickname change by " + message.author.tag + " (" + message.author.id + ")");
+              await member.setNickname(nextNickname, "Bulk nickname prefix by " + message.author.tag + " (" + message.author.id + ")");
               renamed++;
             } catch {
               failed++;
             }
           }
           return void message.reply({
-            content: "Bulk nickname change finished. Renamed: " + renamed + "; skipped: " + skipped + "; failed: " + failed + ".",
+            content: "Nickname prefix finished. Renamed: " + renamed + "; skipped: " + skipped + "; failed: " + failed + ".",
             allowedMentions: { parse: [] },
           });
         }
 
-        return void message.reply("Usage: !nickname all <name>, then !nickname confirm <code>.");
+        let prefix = subcommand === "all" ? args.slice(1).join(" ") : args.join(" ");
+        prefix = prefix.trim().replace(/\s*\|\s*$/, "").trim();
+        if (!prefix || prefix.length + 3 > 31) {
+          return void message.reply("Usage: !nickname <prefix> (for example: !nickname 926 or !nickname koc |). The prefix must leave room for at least one character of each name.");
+        }
+
+        let botMember = message.guild.members.me;
+        if (!botMember) botMember = await message.guild.members.fetchMe().catch(() => null);
+        if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+          return void message.reply("I need the Manage Nicknames permission to do that.");
+        }
+
+        const members = await message.guild.members.fetch().catch(() => null);
+        if (!members) {
+          return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+        }
+        const targets = members.filter(member =>
+          !member.user.bot &&
+          member.id !== message.guild.ownerId &&
+          member.manageable &&
+          buildPrefixedNickname(member, prefix) !== member.displayName
+        );
+        if (!targets.size) {
+          return void message.reply("No eligible members need a nickname change. Bots, the server owner, and members above my role are excluded.");
+        }
+
+        const code = Math.random().toString(36).slice(2, 8).toUpperCase().padEnd(6, "0");
+        pendingBulkNicknameChanges.set(pendingKey, {
+          prefix,
+          code,
+          expiresAt: Date.now() + 60_000,
+        });
+        return void message.reply({
+          content: "This will add " + prefix + " | before the current name of " + targets.size + " manageable member(s). Bots, the server owner, and members above my role are excluded. To proceed, type !nickname confirm " + code + " within 60 seconds.",
+          allowedMentions: { parse: [] },
+        });
       }
 
       case "say": {
@@ -2527,7 +2532,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!nickname all <name>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
