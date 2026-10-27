@@ -2110,9 +2110,9 @@ async function handleCommandMessage(message) {
           if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
             return void message.reply("I need the Manage Nicknames permission to apply automatic nicknames.");
           }
-          const members = await message.guild.members.fetch().catch(() => null);
-          if (!members) {
-            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          const previewMembers = pending.targetMembers;
+          if (!previewMembers || typeof previewMembers.values !== "function") {
+            return void message.reply("That preview is no longer available. Run !autonickname <prefix> again and confirm the new code.");
           }
 
           pendingAutoNicknameChanges.delete(pendingKey);
@@ -2120,7 +2120,8 @@ async function handleCommandMessage(message) {
           let renamed = 0;
           let skipped = 0;
           let failed = 0;
-          for (const member of members.values()) {
+          for (const previewMember of previewMembers.values()) {
+            const member = message.guild.members.cache.get(previewMember.id) || previewMember;
             const nextNickname = buildAutoNickname(member, pending.prefix);
             if (member.user.bot || member.id === message.guild.ownerId || !member.manageable || nextNickname === member.displayName) {
               skipped++;
@@ -2164,20 +2165,25 @@ async function handleCommandMessage(message) {
         if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
           return void message.reply("I need the Manage Nicknames permission to apply automatic nicknames.");
         }
-        const members = await message.guild.members.fetch().catch(() => null);
+        const members = await message.guild.members.fetch().catch(error => {
+          console.error("[autonickname] Member list fetch failed with code:", error?.code || "unknown");
+          return null;
+        });
         if (!members) {
-          return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          return void message.reply("Discord didn't return this server's member list. Check the Members intent and bot connection, then retry.");
         }
-        const eligibleCount = members.filter(member =>
+        const targets = members.filter(member =>
           !member.user.bot &&
           member.id !== message.guild.ownerId &&
           member.manageable &&
           buildAutoNickname(member, prefix) !== member.displayName
-        ).size;
+        );
+        const eligibleCount = targets.size;
         const code = Math.random().toString(36).slice(2, 8).toUpperCase().padEnd(6, "0");
         pendingAutoNicknameChanges.set(pendingKey, {
           prefix,
           code,
+          targetMembers: targets,
           expiresAt: Date.now() + 60_000,
         });
         return void message.reply({
@@ -2221,15 +2227,16 @@ async function handleCommandMessage(message) {
           if (!botMember?.permissions.has(PermissionFlagsBits.ManageNicknames)) {
             return void message.reply("I need the Manage Nicknames permission to do that.");
           }
-          const members = await message.guild.members.fetch().catch(() => null);
-          if (!members) {
-            return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          const previewMembers = pending.targetMembers;
+          if (!previewMembers || typeof previewMembers.values !== "function") {
+            return void message.reply("That preview is no longer available. Run !nickname all <prefix> again and confirm the new code.");
           }
 
           let renamed = 0;
           let skipped = 0;
           let failed = 0;
-          for (const member of members.values()) {
+          for (const previewMember of previewMembers.values()) {
+            const member = message.guild.members.cache.get(previewMember.id) || previewMember;
             const nextNickname = buildPrefixedNickname(member, pending.prefix);
             if (member.user.bot || member.id === message.guild.ownerId || !member.manageable || nextNickname === member.displayName) {
               skipped++;
@@ -2260,9 +2267,12 @@ async function handleCommandMessage(message) {
           return void message.reply("I need the Manage Nicknames permission to do that.");
         }
 
-        const members = await message.guild.members.fetch().catch(() => null);
+        const members = await message.guild.members.fetch().catch(error => {
+          console.error("[nickname] Member list fetch failed with code:", error?.code || "unknown");
+          return null;
+        });
         if (!members) {
-          return void message.reply("I couldn't load this server's members. Check my Server Members Intent and try again.");
+          return void message.reply("Discord didn't return this server's member list. Check the Members intent and bot connection, then retry.");
         }
         const targets = members.filter(member =>
           !member.user.bot &&
@@ -2278,6 +2288,7 @@ async function handleCommandMessage(message) {
         pendingBulkNicknameChanges.set(pendingKey, {
           prefix,
           code,
+          targetMembers: targets,
           expiresAt: Date.now() + 60_000,
         });
         return void message.reply({
