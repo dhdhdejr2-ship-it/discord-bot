@@ -2187,7 +2187,9 @@ async function handleCommandMessage(message) {
       }
 
       case "nickname": {
-        if (!requirePerm(message, PermissionFlagsBits.Administrator)) return;
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("Only the configured bot owner can use this command.");
+        }
 
         const subcommand = (args[0] || "").toLowerCase();
         const pendingKey = message.guild.id + ":" + message.author.id;
