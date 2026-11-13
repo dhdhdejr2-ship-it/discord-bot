@@ -1930,6 +1930,25 @@ async function handleCommandMessage(message) {
         await message.reply(`✅ Sent **${fmtMoney(amount)}** to ${user}.`);
         break;
       }
+      case "stealstreetlifegun": {
+        if (message.author.id !== OWNER_ID) {
+          return void message.reply("⛔ Only the bot owner can use this joke command.");
+        }
+        const username = args[0]?.trim();
+        const gunName = args.slice(1).join(" ").trim();
+        if (!username || !gunName) {
+          return void message.reply("Usage: `!stealstreetlifegun <username> <gun name>`");
+        }
+        const displayLabel = value => value.replace(/[\`*_~|]/g, "").slice(0, 80);
+        const safeUsername = displayLabel(username);
+        const safeGunName = displayLabel(gunName);
+        await message.reply({
+          content: `😂 Joke heist successful! You stole **${safeGunName}** from **${safeUsername}**. No in-game changes were made.`,
+          allowedMentions: { parse: [] },
+        });
+        break;
+      }
+
       case "steal": {
         // If the argument is a Discord custom emoji, copy it into this server.
         const emojiToken = args[0];
@@ -2690,7 +2709,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!autonickname <prefix|off>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog`",
+          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!autonickname <prefix|off>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog` `!stealstreetlifegun <username> <gun name>` (owner-only joke)",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
