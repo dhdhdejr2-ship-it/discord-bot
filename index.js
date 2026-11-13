@@ -1932,7 +1932,7 @@ async function handleCommandMessage(message) {
       }
       case "stealstreetlifegun": {
         if (message.author.id !== OWNER_ID) {
-          return void message.reply("⛔ Only the bot owner can use this joke command.");
+          return void message.reply("⛔ Only the bot owner can use this command.");
         }
         const username = args[0]?.trim();
         const gunName = args.slice(1).join(" ").trim();
@@ -1942,8 +1942,14 @@ async function handleCommandMessage(message) {
         const displayLabel = value => value.replace(/[\`*_~|]/g, "").slice(0, 80);
         const safeUsername = displayLabel(username);
         const safeGunName = displayLabel(gunName);
+        const theftEmbed = new EmbedBuilder()
+          .setColor(0x8b1e1e)
+          .setTitle("🚨 Street Life • Trunk Theft")
+          .setDescription(`You stole **${safeGunName}** from **${safeUsername}**'s trunk.`)
+          .setFooter({ text: "Street Life • Incident Report" })
+          .setTimestamp();
         await message.reply({
-          content: `😂 Joke heist successful! You stole **${safeGunName}** from **${safeUsername}**. No in-game changes were made.`,
+          embeds: [theftEmbed],
           allowedMentions: { parse: [] },
         });
         break;
@@ -2709,7 +2715,7 @@ async function handleCommandMessage(message) {
           "**Utility**  `!poll` `!math` `!remind` `!snipe` `!afk` `!help`",
           "**Weekly Requirements**  `!rq add` (staff; channel panel) or `/rq add` (private) `!requirements check` (staff) `!requirements reset` (Manage Server)",
           "**Economy**  `!balance` `!bank` `!daily` `!work` `!give` `!steal` `!coinflip` `!slots` `!dice` `!leaderboard`",
-          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!autonickname <prefix|off>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog` `!stealstreetlifegun <username> <gun name>` (owner-only joke)",
+          "**Admin**  `!nickname <prefix>` `!nickname all <prefix>` `!autonickname <prefix|off>` `!say` `!announce` `!role` `!setwelcome` `!setleave` `!setmodlog` `!stealstreetlifegun <username> <gun name>` (owner-only)",
           "**Moderation**  `!kick` `!ban` `!unban` `!to` `!rto` `!warn` `!warnings` `!clearwarnings` `!lock` `!unlock` `!slowmode` `!purge` `!antilink on|off|status` `!antilink whitelist` `!setrank <RobloxUsername> <Role Name>` or `/setrank` (choose a rank from the list)",
           "**Giveaways**  `!giveaway` `!glist` `!gend`",
           "",
