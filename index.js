@@ -1942,14 +1942,8 @@ async function handleCommandMessage(message) {
         const displayLabel = value => value.replace(/[\`*_~|]/g, "").slice(0, 80);
         const safeUsername = displayLabel(username);
         const safeGunName = displayLabel(gunName);
-        const theftEmbed = new EmbedBuilder()
-          .setColor(0x8b1e1e)
-          .setTitle("🚨 Street Life • Trunk Theft")
-          .setDescription(`You stole **${safeGunName}** from **${safeUsername}**'s trunk.`)
-          .setFooter({ text: "Street Life • Incident Report" })
-          .setTimestamp();
         await message.reply({
-          embeds: [theftEmbed],
+          content: `You stole **${safeGunName}** from **${safeUsername}**.`,
           allowedMentions: { parse: [] },
         });
         break;
